@@ -1,0 +1,42 @@
+<div style="width: 100%; height: 100%; display: flex; flex-direction: column; background: #050505; position: relative; color: #fff; font-family: monospace;">
+  <div id="anomaly-loader" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 1rem; z-index: 1;">
+    <i class="fas fa-radiation fa-spin" style="font-size: 3rem; color: #a3e635;"></i>
+    <div style="font-size: 1.2rem; margin-bottom: 0.5rem; color: #a3e635;">Загрузка Аномальной Зоны...</div>
+    <div style="width: 200px; height: 6px; background: #333; border-radius: 3px; overflow: hidden;">
+      <div style="width: 100%; height: 100%; background: #a3e635; animation: loadBar 2s infinite ease-in-out;"></div>
+    </div>
+  </div>
+  <style>
+    @keyframes loadBar {
+      0% { transform: translateX(-100%); }
+      50% { transform: translateX(0); }
+      100% { transform: translateX(100%); }
+    }
+  </style>
+  <iframe id="anomaly-zone-iframe" style="width: 100%; height: 100%; border: none; position: relative; z-index: 10;" allow="fullscreen" onload="document.getElementById('anomaly-loader').style.display='none'"></iframe>
+  <script>
+    (function() {
+      var prefix = "";
+      if (typeof ROUTE_PREFIX !== "undefined") {
+        prefix = ROUTE_PREFIX;
+      } else if (typeof game !== "undefined" && typeof game.routePrefix === "string") {
+        prefix = game.routePrefix;
+      }
+      
+      // Normalize prefix leading/trailing slashes
+      if (prefix && prefix.charAt(0) !== '/') {
+        prefix = '/' + prefix;
+      }
+      if (prefix && prefix.slice(-1) === '/') {
+        prefix = prefix.slice(0, -1);
+      }
+      
+      var srcUrl = prefix + "/modules/anomaly-zone-minigame/dist/index.html";
+      console.log("Anomaly Zone Mini-game | Загрузка фрейма из URL:", srcUrl);
+      var iframe = document.getElementById("anomaly-zone-iframe");
+      if (iframe) {
+        iframe.src = srcUrl;
+      }
+    })();
+  </script>
+</div>

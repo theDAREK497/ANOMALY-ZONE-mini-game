@@ -1,0 +1,5 @@
+{
+  "name": "Anomaly Zone Mini-Game",
+  "description": "A standalone web-based mini-game for tabletop RPGs where players navigate an anomalous zone with fog of war, artifacts, stashes, and radiation.",
+  "requestFramePermissions": []
+}

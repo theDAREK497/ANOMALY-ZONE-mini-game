@@ -1,0 +1,20 @@
+{
+  "id": "anomaly-zone-minigame",
+  "title": "Anomaly Zone Mini-game",
+  "description": "Интерактивный лабиринт с процедурными аномалиями, радиацией и встроенным редактором лута для сталкерских приключений.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "11",
+    "verified": "14"
+  },
+  "authors": [
+    {
+      "name": "theDAREK497"
+    }
+  ],
+  "esmodules": ["module.js"],
+  "styles": [],
+  "url": "https://github.com/theDAREK497/ANOMALY-ZONE-foundry",
+  "manifest": "https://raw.githubusercontent.com/theDAREK497/ANOMALY-ZONE-foundry/main/module.json",
+  "download": "https://github.com/theDAREK497/ANOMALY-ZONE-foundry/archive/refs/heads/main.zip"
+}
