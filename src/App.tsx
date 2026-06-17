@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Setup } from './components/Setup';
 import { Game } from './components/Game';
 import { Chat, ChatMessage } from './components/Chat';
+import { Tavern } from './components/Tavern';
 import { generateMap, GameMap, GenerationParams } from './utils/generator';
 
 type GameState = 'setup' | 'playing' | 'ended';
@@ -16,6 +17,7 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState>('setup');
   const [map, setMap] = useState<GameMap | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [activeTab, setActiveTab] = useState<'map' | 'bar'>('map');
   const [stashLoot, setStashLoot] = useState<LootItem[]>([
     { id: '1', name: 'Аптечка', weight: 10 },
     { id: '2', name: 'Патроны', weight: 20 },
@@ -39,13 +41,8 @@ export default function App() {
   const [username, setUsername] = useState<string>(() => {
     return localStorage.getItem('anomaly_username') || '';
   });
-  const [userId] = useState<string>(() => {
-    let id = localStorage.getItem('anomaly_userid');
-    if (!id) {
-      id = Math.random().toString(36).substring(2, 9);
-      localStorage.setItem('anomaly_userid', id);
-    }
-    return id;
+  const [userId, setUserId] = useState<string>(() => {
+    return localStorage.getItem('anomaly_username') || '';
   });
 
   const [isConnected, setIsConnected] = useState(false);
@@ -53,6 +50,29 @@ export default function App() {
   const [players, setPlayers] = useState<any[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isProxyingAsPlayer, setIsProxyingAsPlayer] = useState(false);
+
+  const [existingProfiles, setExistingProfiles] = useState<string[]>([]);
+  const [formName, setFormName] = useState<string>(() => {
+    return localStorage.getItem('anomaly_username') || '';
+  });
+  const [isCreatingNewProfile, setIsCreatingNewProfile] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isConnected) {
+      fetch('/api/profiles')
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            setExistingProfiles(data);
+          }
+        })
+        .catch(err => console.error("Error loading profiles:", err));
+    }
+  }, [isConnected]);
+
+  // Voting states from server socket
+  const [activeVotes, setActiveVotes] = useState<Record<string, { username: string; action: string }>>({});
+  const [activePlayersCount, setActivePlayersCount] = useState<number>(0);
 
   // GM variables mapped to the original design
   const actualGM = userRole === 'gm';
@@ -66,6 +86,32 @@ export default function App() {
       socketRef.current.send(JSON.stringify({
         type: 'SYNC_APP_STATE',
         payload: delta
+      }));
+    }
+  }, []);
+
+  const submitVote = useCallback((action: string) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'SUBMIT_VOTE',
+        payload: { action }
+      }));
+    }
+  }, []);
+
+  const resetVotes = useCallback(() => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'RESET_VOTES'
+      }));
+    }
+  }, []);
+
+  const executeImmediateAction = useCallback((action: string) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'EXECUTE_IMMEDIATE_ACTION',
+        payload: { action }
       }));
     }
   }, []);
@@ -87,7 +133,7 @@ export default function App() {
       setAuthError(null);
       ws.send(JSON.stringify({
         type: 'JOIN',
-        payload: { id: userId, username: nameToJoin, role: roleToJoin }
+        payload: { id: nameToJoin, username: nameToJoin, role: roleToJoin }
       }));
     };
 
@@ -103,6 +149,8 @@ export default function App() {
             if (payload.stashLoot !== undefined) setStashLoot(payload.stashLoot);
             if (payload.artifactLoot !== undefined) setArtifactLoot(payload.artifactLoot);
             setHasActiveGM(payload.hasActiveGM);
+            if (payload.activeVotes !== undefined) setActiveVotes(payload.activeVotes);
+            if (payload.activePlayersCount !== undefined) setActivePlayersCount(payload.activePlayersCount);
             break;
           }
           case 'SYNC_APP_STATE': {
@@ -130,6 +178,15 @@ export default function App() {
             setUserRole('player');
             localStorage.setItem('anomaly_role', 'player');
             alert(payload.message || 'Смена роли');
+            break;
+          }
+          case 'VOTES_UPDATE': {
+            setActiveVotes(payload.activeVotes || {});
+            setActivePlayersCount(payload.activePlayersCount || 0);
+            break;
+          }
+          case 'TIMER_TICK': {
+            setMap(prev => prev ? { ...prev, timerSeconds: payload.timerSeconds } : null);
             break;
           }
         }
@@ -202,15 +259,18 @@ export default function App() {
   const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const target = e.currentTarget;
-    const nameInput = target.elements.namedItem('name') as HTMLInputElement;
     const roleInput = target.elements.namedItem('role') as HTMLInputElement;
 
-    const chosenName = nameInput.value.trim();
+    const chosenName = formName.trim();
     const chosenRole = roleInput.value as 'player' | 'gm';
 
-    if (!chosenName) return;
+    if (!chosenName) {
+      alert("Пожалуйста, введите или выберите кличку сталкера!");
+      return;
+    }
 
     setUsername(chosenName);
+    setUserId(chosenName);
     setUserRole(chosenRole);
     localStorage.setItem('anomaly_username', chosenName);
     localStorage.setItem('anomaly_role', chosenRole);
@@ -323,15 +383,54 @@ export default function App() {
           ) : (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
-                <label className="block text-xs font-mono text-emerald-600 tracking-wider uppercase mb-1.5">Кличка / Позывной Сталкера</label>
-                <input
-                  type="text"
-                  name="name"
-                  required
-                  placeholder="Например: Меченый, Стрелок..."
-                  defaultValue={username}
-                  className="w-full bg-gray-950 border border-gray-800 focus:border-emerald-700 rounded px-3 py-2 text-emerald-300 text-sm focus:outline-none transition-colors placeholder-gray-700"
-                />
+                <label className="block text-xs font-mono text-emerald-600 tracking-wider uppercase mb-1.5">
+                  Профиль КПК Сталкера
+                </label>
+                
+                {existingProfiles.length > 0 ? (
+                  <div className="space-y-3">
+                    <select
+                      className="w-full bg-gray-950 border border-gray-800 focus:border-emerald-700 rounded px-3 py-2 text-emerald-300 text-sm focus:outline-none transition-colors"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "__new__") {
+                          setIsCreatingNewProfile(true);
+                          setFormName("");
+                        } else {
+                          setIsCreatingNewProfile(false);
+                          setFormName(val);
+                        }
+                      }}
+                      value={isCreatingNewProfile ? "__new__" : formName}
+                    >
+                      <option value="">-- Выберите существующий профиль --</option>
+                      {existingProfiles.map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                      <option value="__new__">+ Новый Сталкер (Создать профиль)...</option>
+                    </select>
+
+                    {(isCreatingNewProfile || !formName || !existingProfiles.includes(formName)) && (
+                      <input
+                        type="text"
+                        required
+                        value={formName}
+                        onChange={(e) => setFormName(e.target.value)}
+                        placeholder="Введите кличку нового сталкера..."
+                        className="w-full bg-gray-950 border border-gray-800 focus:border-emerald-700 rounded px-3 py-2 text-emerald-300 text-sm focus:outline-none transition-colors placeholder-gray-700 animate-fade-in"
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    required
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    placeholder="Например: Меченый, Стрелок..."
+                    className="w-full bg-gray-950 border border-gray-800 focus:border-emerald-700 rounded px-3 py-2 text-emerald-300 text-sm focus:outline-none transition-colors placeholder-gray-700"
+                  />
+                )}
               </div>
 
               <div>
@@ -400,6 +499,21 @@ export default function App() {
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
               <span className="text-emerald-400 uppercase">СВЯЗЬ АКТИВНА</span>
             </div>
+
+            <div className="flex bg-gray-950 p-1 rounded border border-gray-800 text-xs font-mono select-none">
+              <button
+                onClick={() => setActiveTab('map')}
+                className={`px-3 py-1.5 rounded transition font-bold cursor-pointer ${activeTab === 'map' ? 'bg-emerald-600 text-gray-950' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                🗺️ Карта Зоны
+              </button>
+              <button
+                onClick={() => setActiveTab('bar')}
+                className={`px-3 py-1.5 rounded transition font-bold cursor-pointer ${activeTab === 'bar' ? 'bg-emerald-600 text-gray-950' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                🍺 Бар «100 Рентген»
+              </button>
+            </div>
             
             <div className="flex items-center gap-1.5">
               {!isGM ? (
@@ -449,53 +563,72 @@ export default function App() {
 
         <main className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6">
           <div className="flex-1 min-h-0 overflow-y-auto">
-            {gameState === 'setup' && isGM && (
-              <Setup 
-                onGenerate={handleGenerate} 
-                stashLoot={stashLoot}
-                setStashLoot={(l) => { setStashLoot(l); syncStatePayload({ stashLoot: l }); }}
-                artifactLoot={artifactLoot}
-                setArtifactLoot={(l) => { setArtifactLoot(l); syncStatePayload({ artifactLoot: l }); }}
-              />
-            )}
-            {gameState === 'setup' && !isGM && (
-              <div className="h-full flex flex-col items-center justify-center bg-gray-900 rounded-lg border border-gray-800 p-8">
-                <i className="fas fa-satellite-dish text-6xl text-emerald-600 mb-6 animate-pulse"></i>
-                <h2 className="text-2xl font-bold text-gray-300 mb-4 tracking-wide">ПРИНИМАЕМ ДАННЫЕ О ЗОНЕ...</h2>
-                <p className="text-gray-400 text-center max-w-md">Куратор ({players.find(p => p.role === 'gm')?.username || 'Гейм-мастер'}) настраивает аномальную зону. Ожидайте сигнал...</p>
-              </div>
-            )}
-            
-            {gameState === 'playing' && map && (
-              <Game 
-                initialMap={map} 
-                onAddMessage={addMessage} 
-                onEndGame={handleEndGame} 
-                stashLoot={stashLoot}
-                artifactLoot={artifactLoot}
+            {activeTab === 'bar' ? (
+              <Tavern
+                ws={socketRef.current}
+                userId={userId}
+                username={username}
                 isGM={isGM}
-                onUpdateMap={(newMap) => {
-                  setMap(newMap);
-                  syncStatePayload({ map: newMap });
-                }}
+                gameMap={map}
               />
-            )}
-
-            {gameState === 'ended' && (
-              <div className="h-full flex flex-col items-center justify-center bg-gray-900 rounded-lg border border-emerald-900/40 p-8">
-                <h2 className="text-4xl font-extrabold text-emerald-500 mb-4 tracking-wider">ЭВАКУАЦИЯ УСПЕШНА</h2>
-                <p className="text-gray-400 mb-8 text-center max-w-sm">
-                  Группа преодолела опасности аномальной зоны и вернулась на базу с добытыми артефактами.
-                </p>
-                {isGM && (
-                  <button 
-                    onClick={resetGame}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-gray-950 font-extrabold py-3 px-8 rounded transition-colors uppercase tracking-wider cursor-pointer"
-                  >
-                    Запустить повторную экспедицию
-                  </button>
+            ) : (
+              <>
+                {gameState === 'setup' && isGM && (
+                  <Setup 
+                    onGenerate={handleGenerate} 
+                    stashLoot={stashLoot}
+                    setStashLoot={(l) => { setStashLoot(l); syncStatePayload({ stashLoot: l }); }}
+                    artifactLoot={artifactLoot}
+                    setArtifactLoot={(l) => { setArtifactLoot(l); syncStatePayload({ artifactLoot: l }); }}
+                  />
                 )}
-              </div>
+                {gameState === 'setup' && !isGM && (
+                  <div className="h-full flex flex-col items-center justify-center bg-gray-900 rounded-lg border border-gray-800 p-8">
+                    <i className="fas fa-satellite-dish text-6xl text-emerald-600 mb-6 animate-pulse"></i>
+                    <h2 className="text-2xl font-bold text-gray-300 mb-4 tracking-wide">ПРИНИМАЕМ ДАННЫЕ О ЗОНЕ...</h2>
+                    <p className="text-gray-400 text-center max-w-md">Куратор ({players.find(p => p.role === 'gm')?.username || 'Гейм-мастер'}) настраивает аномальную зону. Ожидайте сигнал...</p>
+                  </div>
+                )}
+                
+                {gameState === 'playing' && map && (
+                  <Game 
+                    initialMap={map} 
+                    onAddMessage={addMessage} 
+                    onEndGame={handleEndGame} 
+                    stashLoot={stashLoot}
+                    artifactLoot={artifactLoot}
+                    isGM={isGM}
+                    onUpdateMap={(newMap) => {
+                      setMap(newMap);
+                      syncStatePayload({ map: newMap });
+                    }}
+                    activeVotes={activeVotes}
+                    activePlayersCount={activePlayersCount}
+                    onSubmitVote={submitVote}
+                    onResetVotes={resetVotes}
+                    onExecuteImmediateAction={executeImmediateAction}
+                    username={username}
+                    userId={userId}
+                  />
+                )}
+
+                {gameState === 'ended' && (
+                  <div className="h-full flex flex-col items-center justify-center bg-gray-900 rounded-lg border border-emerald-900/40 p-8">
+                    <h2 className="text-4xl font-extrabold text-emerald-500 mb-4 tracking-wider">ЭВАКУАЦИЯ УСПЕШНА</h2>
+                    <p className="text-gray-400 mb-8 text-center max-w-sm">
+                      Группа преодолела опасности аномальной зоны и вернулась на базу с добытыми артефактами.
+                    </p>
+                    {isGM && (
+                      <button 
+                        onClick={resetGame}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-gray-950 font-extrabold py-3 px-8 rounded transition-colors uppercase tracking-wider cursor-pointer"
+                      >
+                        Запустить повторную экспедицию
+                      </button>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
 

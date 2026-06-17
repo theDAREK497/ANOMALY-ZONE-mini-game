@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import http from "http";
+import fs from "fs";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createViteServer } from "vite";
 
@@ -35,6 +36,9 @@ let artifactLoot: any[] = [
   { id: "5", name: "Медуза", weight: 30 },
 ];
 
+// Active Player voting pool tracking
+let activeVotes: Record<string, { username: string; action: string }> = {};
+
 // Connected Sockets
 const clients = new Map<WebSocket, Player>();
 
@@ -56,6 +60,785 @@ function getActiveGMId(): string | null {
   return null;
 }
 
+function getActivePlayersCount(): number {
+  return Array.from(clients.values()).filter(p => p.role === "player").length;
+}
+
+function appendSystemMessage(text: string, type: string = "info") {
+  const msgObj = {
+    id: Math.random().toString(36).substring(2, 9),
+    sender: "СИСТЕМА",
+    text,
+    type,
+    timestamp: new Date().toLocaleTimeString(),
+  };
+  messages.push(msgObj);
+}
+
+function getWeightedLoot(lootTable: any[]) {
+  if (lootTable.length === 0) return "Ничего";
+  const totalWeight = lootTable.reduce((sum, item) => sum + item.weight, 0);
+  let random = Math.random() * totalWeight;
+  for (const item of lootTable) {
+    random -= item.weight;
+    if (random <= 0) return item.name;
+  }
+  return lootTable[lootTable.length - 1].name;
+}
+
+// Check survival parameters (rad limit or health zero)
+function checkGameLossSurvival() {
+  if (!map) return;
+  if (map.health <= 0) {
+    appendSystemMessage("💀 ГРУППА ПОГИБЛА! Очки здоровья полностью иссякли в аномалии!", "danger");
+    gameState = "ended";
+  }
+  if (map.radiation >= map.maxRadiation) {
+    appendSystemMessage("💀 ГРУППА ПОГИБЛА! Набор критической радиации привел к лучевой смерти всего отряда!", "danger");
+    gameState = "ended";
+  }
+}
+
+// Handle artifact scans based on level
+function resolveArtifactDetectionByLevel(px: number, py: number) {
+  let artifacts: { x: number; y: number; dist: number }[] = [];
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      if (map.grid[y][x].type === "artifact") {
+        const dist = Math.max(Math.abs(x - px), Math.abs(y - py));
+        if (dist <= 3) {
+          artifacts.push({ x, y, dist });
+        }
+      }
+    }
+  }
+
+  // Sort closest
+  artifacts.sort((a, b) => a.dist - b.dist);
+
+  // Scan radius 3 cells
+  for (let dy = -3; dy <= 3; dy++) {
+    for (let dx = -3; dx <= 3; dx++) {
+      const nx = px + dx;
+      const ny = py + dy;
+      if (nx >= 0 && nx < map.width && ny >= 0 && ny < map.height) {
+        map.grid[ny][nx].isScannedForArtifact = true;
+      }
+    }
+  }
+
+  if (artifacts.length === 0) {
+    appendSystemMessage("🔮 Анализатор артефактов молчит. В радиусе 3х клеток пусто.", "info");
+    map.activeDirectionHighlight = null;
+    return;
+  }
+
+  const closest = artifacts[0];
+  const level = map.detectorLevel;
+
+  if (level === 1) {
+    appendSystemMessage("🔮 УРОВЕНЬ 1 (ПРОСТОЙ): Детектор мерно пищит. Поблизости есть артефакт!", "loot");
+    map.activeDirectionHighlight = null;
+  } else if (level === 2) {
+    let dirY = "";
+    let dirX = "";
+    if (closest.y < py) dirY = "СЕВЕР";
+    else if (closest.y > py) dirY = "ЮГ";
+
+    if (closest.x < px) dirX = "ЗАПАД";
+    else if (closest.x > px) dirX = "ВОСТОК";
+
+    const directionText = [dirY, dirX].filter(Boolean).join("-");
+    appendSystemMessage(`🔮 УРОВЕНЬ 2 (НАПРАВЛЕНИЕ): Радар фиксирует излучение в направлении: ${directionText}!`, "loot");
+
+    let code = "";
+    if (closest.y < py) code += "N";
+    if (closest.y > py) code += "S";
+    if (closest.x < px) code += "W";
+    if (closest.x > px) code += "E";
+    map.activeDirectionHighlight = code;
+  } else if (level === 3) {
+    appendSystemMessage("🔮 УРОВЕНЬ 3 (ОБЛАСТЬ): Прибор локализовал артефакт в приблизительном квадрате 3x3!", "loot");
+    map.activeDirectionHighlight = null;
+    
+    // Highlight a 3x3 centered around the artifact
+    const ax = closest.x;
+    const ay = closest.y;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const hx = ax + dx;
+        const hy = ay + dy;
+        if (hx >= 0 && hx < map.width && hy >= 0 && hy < map.height) {
+          map.grid[hy][hx].isScannedForArtifact = true;
+          map.grid[hy][hx].isApproximateLocation = true;
+        }
+      }
+    }
+  } else if (level === 4) {
+    appendSystemMessage("🔮 УРОВЕНЬ 4 (ТОЧНЫЙ): Координаты артефакта полностью рассекречены!", "loot");
+    map.activeDirectionHighlight = null;
+    map.grid[closest.y][closest.x].isRevealed = true;
+    map.grid[closest.y][closest.x].isScannedForArtifact = true;
+  }
+}
+
+// Process Cell entry
+function resolveCellEnter(nx: number, ny: number) {
+  map.grid[ny][nx].isRevealed = true;
+  const cell = map.grid[ny][nx];
+
+  // 1. Radiation Check
+  if (cell.radiationLevel > 0) {
+    const dose = cell.radiationLevel * 8;
+    map.radiation = Math.min(map.maxRadiation, map.radiation + dose);
+    appendSystemMessage(`☣️ Внимание! Доза облучения: +${dose} рад (Тек: ${map.radiation}/${map.maxRadiation})!`, "warning");
+
+    const radDmg = cell.radiationLevel * 6;
+    map.health = Math.max(0, map.health - radDmg);
+    appendSystemMessage(`💔 Здоровье отряда снизилось на -${radDmg} HP из-за фонирующих очагов радиации.`, "danger");
+  }
+
+  // 2. Safe / exit check
+  if (cell.type === "exit") {
+    appendSystemMessage("🏆 Поздравляем! Группа успешно преодолела кордоны и покинула аномальную зону!", "success");
+    gameState = "ended";
+    return;
+  }
+
+  // 3. Stash check
+  if (cell.type === "stash") {
+    const loot = getWeightedLoot(stashLoot);
+    appendSystemMessage(`📦 Найден заброшенный схрон! Получено: "${loot}"`, "loot");
+    if (!map.inventory) map.inventory = [];
+    if (loot && loot !== "Ничего" && loot !== "Пусто") {
+      map.inventory.push(loot);
+    }
+    map.grid[ny][nx].type = "empty";
+  }
+
+  // 4. Artifact entry
+  if (cell.type === "artifact") {
+    const loot = getWeightedLoot(artifactLoot);
+    appendSystemMessage(`💎 УРА! Вы подобрали ценный артефакт: "${loot}"`, "loot");
+    if (!map.inventory) map.inventory = [];
+    if (loot && loot !== "Ничего" && loot !== "Пусто") {
+      map.inventory.push(loot);
+    }
+    map.grid[ny][nx].type = "empty";
+  }
+
+  // 5. Anomaly triggering
+  if (cell.type === "anomaly") {
+    const name = cell.anomalyType;
+    if (name === "fire") {
+      map.health = Math.max(0, map.health - 25);
+      appendSystemMessage("🔥 ЖАРКА! Огненный столб сжигает снаряжение: -25HP у всей группы!", "danger");
+    } else if (name === "trampoline") {
+      map.health = Math.max(0, map.health - 20);
+      appendSystemMessage("💨 ТРАМПЛИН! Столкновение сжатого воздуха швыряет группу: -20HP! Случайная телепортация...", "danger");
+      const tx = Math.floor(Math.random() * map.width);
+      const ty = Math.floor(Math.random() * map.height);
+      map.playerPos = { x: tx, y: ty };
+      resolveCellEnter(tx, ty);
+    } else if (name === "sphere") {
+      map.health = Math.max(0, map.health - 30);
+      appendSystemMessage("🫧 ГРАВИ-СФЕРА! Сдавливающий купол наносит тяжелые увечья: -30HP!", "danger");
+      if (!cell.hasExpanded) {
+        cell.hasExpanded = true;
+        const adj = [
+          {dx:1, dy:0}, {dx:-1, dy:0}, {dx:0, dy:1}, {dx:0, dy:-1},
+          {dx:1, dy:1}, {dx:-1, dy:-1}, {dx:1, dy:-1}, {dx:-1, dy:1}
+        ];
+        adj.forEach(d => {
+          const ax = nx + d.dx;
+          const ay = ny + d.dy;
+          if (ax >= 0 && ax < map.width && ay >= 0 && ay < map.height) {
+            if (map.grid[ay][ax].type === "empty") {
+              map.grid[ay][ax] = {
+                ...map.grid[ay][ax],
+                type: "anomaly",
+                anomalyType: "sphere",
+                isRevealed: true,
+                hasExpanded: true
+              };
+            }
+          }
+        });
+        appendSystemMessage("🫧 Аномалия Сфера детонировала и расширила смертоносное поле на соседние клетки!", "danger");
+      }
+    } else if (name === "electric") {
+      map.health = Math.max(0, map.health - 25);
+      appendSystemMessage("⚡ ЭЛЕКТРА! Электрический шок парализует отряд: -25HP!", "danger");
+    } else if (name === "vortex") {
+      map.health = Math.max(0, map.health - 15);
+      appendSystemMessage("🌀 ВОРОНКА! Группу затянуло в малую сингулярность: -15HP! Вы сдвинуты в сторону.", "danger");
+      const directions = [{dx:1, dy:0}, {dx:-1, dy:0}, {dx:0, dy:1}, {dx:0, dy:-1}];
+      const valid = directions.filter(d => 
+        nx + d.dx >= 0 && nx + d.dx < map.width && 
+        ny + d.dy >= 0 && ny + d.dy < map.height
+      );
+      if (valid.length > 0) {
+        const d = valid[Math.floor(Math.random() * valid.length)];
+        map.playerPos = { x: nx + d.dx, y: ny + d.dy };
+        resolveCellEnter(nx + d.dx, ny + d.dy);
+      }
+    } else if (name === "time_loop") {
+      map.health = Math.max(0, map.health - 10);
+      appendSystemMessage("⏳ ХРОНОСДВИГ! Вспышка временной петли перебрасывает группу на точку входа: -10HP!", "danger");
+      map.playerPos = { x: map.entrance.x, y: map.entrance.y };
+      resolveCellEnter(map.entrance.x, map.entrance.y);
+    }
+  }
+}
+
+function getAnomalyRussianName(type: string | null): string {
+  if (!type) return "Неизвестная аномалия";
+  const translations: Record<string, string> = {
+    "fire": "Жарка",
+    "trampoline": "Трамплин",
+    "sphere": "Грави-сфера",
+    "electric": "Электра",
+    "vortex": "Воронка",
+    "time_loop": "Хроносдвиг"
+  };
+  return translations[type] || type;
+}
+
+// Centralized Action Execution (re-used for both voting consensus and GM immediate clicks)
+function executeGameAction(action: string) {
+  if (!map) return;
+  if (!map.playerPos) {
+    map.playerPos = { x: map.entrance.x, y: map.entrance.y };
+  }
+
+  const px = map.playerPos.x;
+  const py = map.playerPos.y;
+
+  let dx = 0;
+  let dy = 0;
+
+  if (action === "UP") dy = -1;
+  else if (action === "DOWN") dy = 1;
+  else if (action === "LEFT") dx = -1;
+  else if (action === "RIGHT") dx = 1;
+
+  if (dx !== 0 || dy !== 0) {
+    const nx = px + dx;
+    const ny = py + dy;
+    if (nx >= 0 && nx < map.width && ny >= 0 && ny < map.height) {
+      map.playerPos = { x: nx, y: ny };
+      resolveCellEnter(nx, ny);
+    } else {
+      appendSystemMessage("⛔ Командир передумал: движение за границы изученного сектора заблокировано!");
+    }
+  } else if (action.startsWith("BOLT")) {
+    // Validate custom bolt charges (as configured by setup, defaults to 10)
+    if (map.boltCharges === undefined) map.boltCharges = 10;
+    
+    if (map.boltCharges <= 0) {
+      appendSystemMessage("❌ Невозможно бросить болт: закончился запас в рюкзаке!", "warning");
+      return;
+    }
+    map.boltCharges--;
+
+    // Determine direction
+    let boltDir = "UP";
+    if (action.includes("_")) {
+      boltDir = action.split("_")[1];
+    }
+    
+    let bdx = 0;
+    let bdy = 0;
+    let directionName = "";
+
+    if (boltDir === "UP") { bdy = -1; directionName = "вверх (на СЕВЕР) ⬆️"; }
+    else if (boltDir === "DOWN") { bdy = 1; directionName = "вниз (на ЮГ) ⬇️"; }
+    else if (boltDir === "LEFT") { bdx = -1; directionName = "влево (на ЗАПАД) ⬅️"; }
+    else if (boltDir === "RIGHT") { bdx = 1; directionName = "вправо (на ВОСТОК) ➡️"; }
+
+    appendSystemMessage(`🔩 Брошен болт в направлении: ${directionName}! Осталось болтов: ${map.boltCharges}`);
+
+    let anomalyDetected = false;
+    // Scan up to 3 cells along the specified vector direction
+    for (let step = 1; step <= 3; step++) {
+      const targetX = px + bdx * step;
+      const targetY = py + bdy * step;
+
+      if (targetX >= 0 && targetX < map.width && targetY >= 0 && targetY < map.height) {
+        map.grid[targetY][targetX].isScannedByBolt = true;
+        
+        if (map.grid[targetY][targetX].type === "anomaly") {
+          anomalyDetected = true;
+          map.grid[targetY][targetX].isRevealed = true;
+          const translatedName = getAnomalyRussianName(map.grid[targetY][targetX].anomalyType);
+          appendSystemMessage(`💥 Болт детонировал аномалию на расстоянии ${step} кл. под воздействием очага: "${translatedName}"!`, "danger");
+          break; // Bolt path blocked
+        }
+      } else {
+        break; // Flyout of bounds
+      }
+    }
+
+    if (!anomalyDetected) {
+      appendSystemMessage(`🟢 Болт пролетел путь по направлению ${directionName} и упал без шума. Опасности впереди нет.`, "success");
+    }
+  } else if (action === "GEIGER") {
+    if (map.geigerCharges <= 0) {
+      appendSystemMessage("❌ Невозможно запустить счетчик Гейгера: разряжены аккумуляторы!", "warning");
+      return;
+    }
+    map.geigerCharges--;
+    appendSystemMessage(`📡 Активирован счетчик Гейгера (Зарядов осталось: ${map.geigerCharges})`);
+    let foundRad = false;
+    for (let gdy = -2; gdy <= 2; gdy++) {
+      for (let gdx = -2; gdx <= 2; gdx++) {
+        const nx = px + gdx;
+        const ny = py + gdy;
+        if (nx >= 0 && nx < map.width && ny >= 0 && ny < map.height) {
+          map.grid[ny][nx].isScannedForRadiation = true;
+          if (map.grid[ny][nx].radiationLevel > 0) foundRad = true;
+        }
+      }
+    }
+    if (foundRad) {
+      appendSystemMessage("⚠️ Предупреждение! Рядом обнаружены очаги жесткой радиации!", "warning");
+    } else {
+      appendSystemMessage("🟢 Радиационный фон вокруг отряда в пределах нормы.", "success");
+    }
+  } else if (action === "SCAN") {
+    if (map.detectorCharges <= 0) {
+      appendSystemMessage("❌ Поиск сорван: детектор артефактов полностью разряжен!", "warning");
+      return;
+    }
+    map.detectorCharges--;
+    appendSystemMessage(`🔮 Запущен детектор артефактов (Уровень Детектора: ${map.detectorLevel}, зарядов: ${map.detectorCharges})`);
+    resolveArtifactDetectionByLevel(px, py);
+  }
+
+  // Clear directional semi-circle highlights on movement
+  if (action === "UP" || action === "DOWN" || action === "LEFT" || action === "RIGHT") {
+    map.activeDirectionHighlight = null;
+  }
+
+  // Reset timer to 60s
+  map.timerSeconds = 60;
+
+  // Audit survival bounds
+  checkGameLossSurvival();
+}
+
+// One global server-side interval ticker for active synchronized turn count
+let serverClockInterval: any = null;
+function initTurnTimerClock() {
+  if (serverClockInterval) clearInterval(serverClockInterval);
+  serverClockInterval = setInterval(() => {
+    if (gameState === "playing" && map) {
+      if (map.timerSeconds > 0) {
+        map.timerSeconds--;
+        broadcast("TIMER_TICK", { timerSeconds: map.timerSeconds });
+      } else {
+        // Penalty dose
+        map.timerSeconds = 60;
+        const radPenalty = 15;
+        map.radiation = Math.min(map.maxRadiation, map.radiation + radPenalty);
+        appendSystemMessage(`⚠️ ВРЕМЯ ХОДА ИСТЕКЛО! Пребывание без движения облучает отряд (+${radPenalty} рад)!`, "danger");
+        
+        // Take small health damage too
+        map.health = Math.max(0, map.health - 10);
+        
+        checkGameLossSurvival();
+        
+        // Reset active votes on timeout
+        activeVotes = {};
+        broadcast("VOTES_UPDATE", { activeVotes, activePlayersCount: getActivePlayersCount() });
+        broadcast("SYNC_APP_STATE", { map, gameState, messages });
+      }
+    }
+  }, 1000);
+}
+
+// Start immediately
+initTurnTimerClock();
+
+// ==========================================
+// 🍺 ТАВЕРНА, КОШЕЛЕК И МИНИ-ИГРЫ СЕРВЕРА 🍺
+// ==========================================
+const PLAYER_DB_FILE = path.join(process.cwd(), "db_players.json");
+let playerDb: Record<string, {
+  userName?: string;
+  balance: number;
+  unlockedCards: string[];
+  pazaakDeck: string[];
+}> = {};
+
+try {
+  if (fs.existsSync(PLAYER_DB_FILE)) {
+    playerDb = JSON.parse(fs.readFileSync(PLAYER_DB_FILE, "utf-8"));
+  }
+} catch (e) {
+  console.error("Ошибка загрузки db_players.json, создаем новый:", e);
+}
+
+function savePlayerDb() {
+  try {
+    fs.writeFileSync(PLAYER_DB_FILE, JSON.stringify(playerDb, null, 2), "utf-8");
+  } catch (e) {
+    console.error("Ошибка сохранения db_players.json:", e);
+  }
+}
+
+const SHOP_ITEMS_FILE = path.join(process.cwd(), "db_shop_items.json");
+interface ShopItem {
+  id: string;
+  name: string;
+  price: number;
+  type: "med" | "weapon" | "ammo" | "armor" | "art" | "misc";
+  description: string;
+}
+let shopItems: ShopItem[] = [];
+
+try {
+  if (fs.existsSync(SHOP_ITEMS_FILE)) {
+    shopItems = JSON.parse(fs.readFileSync(SHOP_ITEMS_FILE, "utf-8"));
+  } else {
+    shopItems = [
+      { id: "s1", name: "Аптечка первой помощи", price: 150, type: "med", description: "Быстро восстанавливает здоровье отряда." },
+      { id: "s2", name: "Антирадиационный шприц", price: 100, type: "med", description: "Выводит 150 рад тяжелых изотопов." },
+      { id: "s3", name: "Экзоскелет Монолита", price: 1500, type: "armor", description: "Превосходная броня." },
+      { id: "s4", name: "Научная аптечка", price: 250, type: "med", description: "Премиальный сталкерский медикамент." },
+      { id: "s5", name: "Детектор 'Отклик'", price: 300, type: "misc", description: "Простой детектор артефактов." }
+    ];
+    fs.writeFileSync(SHOP_ITEMS_FILE, JSON.stringify(shopItems, null, 2), "utf-8");
+  }
+} catch (e) {
+  console.error("Ошибка загрузки db_shop_items.json:", e);
+}
+
+function saveShopItems() {
+  try {
+    fs.writeFileSync(SHOP_ITEMS_FILE, JSON.stringify(shopItems, null, 2), "utf-8");
+  } catch (e) {
+    console.error("Ошибка сохранения db_shop_items.json:", e);
+  }
+}
+
+const TAVERN_SETTINGS_FILE = path.join(process.cwd(), "db_tavern_settings.json");
+interface TavernSettings {
+  tavernName: string;
+  enabledGames: {
+    trades: boolean;
+    pazaak: boolean;
+    dice: boolean;
+    races: boolean;
+    slots: boolean;
+    roulette: boolean;
+    shooting: boolean;
+  };
+}
+let tavernSettings: TavernSettings = {
+  tavernName: "Бар «100 Рентген»",
+  enabledGames: {
+    trades: true,
+    pazaak: true,
+    dice: true,
+    races: true,
+    slots: true,
+    roulette: true,
+    shooting: true
+  }
+};
+
+try {
+  if (fs.existsSync(TAVERN_SETTINGS_FILE)) {
+    tavernSettings = JSON.parse(fs.readFileSync(TAVERN_SETTINGS_FILE, "utf-8"));
+  } else {
+    fs.writeFileSync(TAVERN_SETTINGS_FILE, JSON.stringify(tavernSettings, null, 2), "utf-8");
+  }
+} catch (e) {
+  console.error("Ошибка загрузки db_tavern_settings.json, создаем дефолт:", e);
+}
+
+function saveTavernSettings() {
+  try {
+    fs.writeFileSync(TAVERN_SETTINGS_FILE, JSON.stringify(tavernSettings, null, 2), "utf-8");
+  } catch (e) {
+    console.error("Ошибка сохранения db_tavern_settings.json:", e);
+  }
+}
+
+function initPlayerProfile(id: string, username: string) {
+  if (!playerDb[id]) {
+    playerDb[id] = {
+      userName: username,
+      balance: 1000,
+      unlockedCards: ["+1", "-1", "+2", "-2", "+3", "-3", "+4", "-4", "+5", "-5"],
+      pazaakDeck: []
+    };
+    savePlayerDb();
+    appendSystemMessage(`👤 База Данных: Сформирован кошелек в КПК-сети для сталкера "${username}" (+1000 RU).`, "info");
+  } else if (!playerDb[id].userName) {
+    playerDb[id].userName = username;
+    savePlayerDb();
+  }
+  return playerDb[id];
+}
+
+function broadcastTavernGames() {
+  broadcast("SYNC_TAVERN_GAMES", { pazaakLobbies, playerDb, activeRace, shopItems, tavernSettings });
+}
+
+// ПАЗААК ЛОББИ И РУЛЕТКА
+let pazaakLobbies: Record<string, any> = {};
+
+// АНОМАЛЬНЫЕ СКАЧКИ ОДДС
+let activeRace: {
+  status: "none" | "betting" | "running" | "finished";
+  contestants: { name: string; position: number; odds: number; color: string; type: "favorite" | "balanced" | "underdog" }[];
+  bets: { playerId: string; username: string; contestantName: string; betAmount: number }[];
+  winner: string | null;
+  log: string[];
+  tickCount: number;
+} = {
+  status: "none",
+  contestants: [
+    { name: "Буян 🐎", position: 0, odds: 1.4, color: "text-amber-500", type: "favorite" },
+    { name: "Шустрый 🐜", position: 0, odds: 2.0, color: "text-emerald-500", type: "balanced" },
+    { name: "Усач Сидоровича 🪳", position: 0, odds: 2.6, color: "text-yellow-500", type: "balanced" },
+    { name: "Ржавый Болт 🚗", position: 0, odds: 4.0, color: "text-cyan-500", type: "underdog" }
+  ],
+  bets: [],
+  winner: null,
+  log: [],
+  tickCount: 0
+};
+
+function rollPazaakStep(lobby: any) {
+  if (lobby.status !== "playing") return;
+
+  const currentTurn = lobby.turn;
+  const isA = currentTurn === lobby.creatorId;
+  const stand = isA ? lobby.playerAStand : lobby.playerBStand;
+  
+  if (stand) {
+    if (lobby.playerAStand && lobby.playerBStand) {
+      checkPazaakRoundEnd(lobby);
+      return;
+    }
+    lobby.turn = isA ? lobby.opponentId : lobby.creatorId;
+    rollPazaakStep(lobby);
+    return;
+  }
+
+  // Draw table card 1-10
+  const drawn = Math.floor(Math.random() * 10) + 1;
+  if (isA) {
+    lobby.playerABoard.push(drawn);
+    lobby.playerAScore = lobby.playerABoard.reduce((sum: number, b: number) => sum + b, 0);
+    lobby.log.push(`${lobby.creatorName} тянет карту: ${drawn}. Счет: ${lobby.playerAScore}`);
+    
+    if (lobby.playerAScore > 20) {
+      lobby.statusMessage = `${lobby.creatorName} решает что делать с перебором (${lobby.playerAScore})...`;
+    } else {
+      lobby.statusMessage = `Ход ${lobby.creatorName} (${lobby.playerAScore}). Сыграйте карту КПК или пасуйте.`;
+    }
+  } else {
+    lobby.playerBBoard.push(drawn);
+    lobby.playerBScore = lobby.playerBBoard.reduce((sum: number, b: number) => sum + b, 0);
+    lobby.log.push(`${lobby.opponentName} тянет карту: ${drawn}. Счет: ${lobby.playerBScore}`);
+    
+    if (lobby.playerBScore > 20) {
+      lobby.statusMessage = `${lobby.opponentName} решает что делать с перебором (${lobby.playerBScore})...`;
+    } else {
+      lobby.statusMessage = `Ход ${lobby.opponentName} (${lobby.playerBScore}). Сыграйте карту КПК или пасуйте.`;
+    }
+  }
+
+  if (lobby.opponentId === "BOT_BAR" && lobby.turn === "BOT_BAR" && !lobby.playerBStand) {
+    runPazaakBotTurn(lobby);
+  }
+}
+
+function runPazaakBotTurn(lobby: any) {
+  setTimeout(() => {
+    if (lobby.status !== "playing" || lobby.turn !== "BOT_BAR") return;
+
+    let playedCard = false;
+    let score = lobby.playerBScore;
+
+    for (let i = 0; i < lobby.playerBHands.length; i++) {
+      const card = lobby.playerBHands[i];
+      if (!card) continue;
+      
+      let val = 0;
+      if (card.startsWith("+/-")) {
+        const amt = parseInt(card.replace("+/-", ""), 10);
+        if (score + amt === 20) val = amt;
+        else if (score - amt === 20) val = -amt;
+        else if (score > 20 && score - amt <= 20) val = -amt;
+      } else if (card.startsWith("+")) {
+        const amt = parseInt(card.replace("+", ""), 10);
+        if (score + amt === 20) val = amt;
+      } else if (card.startsWith("-")) {
+        const amt = parseInt(card.replace("-", ""), 10);
+        if (score - amt === 20 || (score > 20 && score - amt <= 20)) val = -amt;
+      } else if (card === "D") {
+        const last = lobby.playerBBoard[lobby.playerBBoard.length - 1] || 0;
+        if (score + last === 20) val = last;
+      }
+
+      if (val !== 0) {
+        lobby.playerBBoard.push(val);
+        lobby.playerBScore = lobby.playerBBoard.reduce((sum: number, b: number) => sum + b, 0);
+        lobby.log.push(`🤖 Харон сыграл карту [${card}] (эффект: ${val > 0 ? '+' : ''}${val}). Счет: ${lobby.playerBScore}`);
+        lobby.playerBHands[i] = null;
+        playedCard = true;
+        break;
+      }
+    }
+
+    score = lobby.playerBScore;
+
+    if (score === 20 || (score >= 18 && score >= lobby.playerAScore && lobby.playerAStand) || (score >= 18 && !lobby.playerAStand)) {
+      lobby.playerBStand = true;
+      lobby.log.push(`🤖 Харон объявил STAND (фиксация) на ${score}`);
+    } else if (score > 20) {
+      lobby.log.push(`🤖 Харон смирился с перебором в ${score} очков.`);
+    } else {
+      lobby.log.push(`🤖 Харон завершил ход на счете ${score}`);
+    }
+
+    checkPazaakRoundEnd(lobby);
+    
+    if (lobby.status === "playing") {
+      if (!lobby.playerAStand) {
+        lobby.turn = lobby.creatorId;
+        rollPazaakStep(lobby);
+      } else if (!lobby.playerBStand) {
+        rollPazaakStep(lobby);
+      }
+    }
+
+    broadcastTavernGames();
+  }, 900);
+}
+
+function checkPazaakRoundEnd(lobby: any) {
+  const pAOver = lobby.playerAScore > 20;
+  const pBOver = lobby.playerBScore > 20;
+
+  const bothStood = lobby.playerAStand && lobby.playerBStand;
+  const nineCardsA = lobby.playerABoard.filter((c: number) => c > 0).length >= 9;
+  const nineCardsB = lobby.playerBBoard.filter((c: number) => c > 0).length >= 9;
+
+  let roundWinner: "A" | "B" | "TIE" | null = null;
+
+  if (pAOver && pBOver) {
+    roundWinner = "TIE";
+  } else if (pAOver) {
+    roundWinner = "B";
+  } else if (pBOver) {
+    roundWinner = "A";
+  } else if (nineCardsA) {
+    roundWinner = "A";
+  } else if (nineCardsB) {
+    roundWinner = "B";
+  } else if (bothStood) {
+    if (lobby.playerAScore > lobby.playerBScore) {
+      roundWinner = "A";
+    } else if (lobby.playerAScore < lobby.playerBScore) {
+      roundWinner = "B";
+    } else {
+      const playsATie = lobby.playerABoard.includes("T");
+      const playsBTie = lobby.playerBBoard.includes("T");
+      if (playsATie && !playsBTie) roundWinner = "A";
+      else if (playsBTie && !playsATie) roundWinner = "B";
+      else roundWinner = "TIE";
+    }
+  }
+
+  if (roundWinner) {
+    if (roundWinner === "A") {
+      lobby.roundsWonA++;
+      lobby.log.push(`🏁 Раунд выиграл ${lobby.creatorName} (${lobby.playerAScore} против ${lobby.playerBScore})!`);
+    } else if (roundWinner === "B") {
+      lobby.roundsWonB++;
+      lobby.log.push(`🏁 Раунд выиграл ${lobby.opponentName} (${lobby.playerAScore} против ${lobby.playerBScore})!`);
+    } else {
+      lobby.log.push(`🏁 Раунд завершился МИРНОЙ НИЧЬЕЙ на счете ${lobby.playerAScore}!`);
+    }
+
+    lobby.playerABoard = [];
+    lobby.playerBBoard = [];
+    lobby.playerAScore = 0;
+    lobby.playerBScore = 0;
+    lobby.playerAStand = false;
+    lobby.playerBStand = false;
+
+    if (lobby.roundsWonA >= 3) {
+      lobby.status = "finished";
+      lobby.winner = lobby.creatorId;
+      lobby.statusMessage = `Победный финал! ${lobby.creatorName} разгромил оппонента ${lobby.roundsWonA}:${lobby.roundsWonB}!`;
+      lobby.log.push(`🏆 ${lobby.creatorName} забирает все! Выигрыш: +${lobby.bet} RU`);
+      
+      if (playerDb[lobby.creatorId]) {
+        playerDb[lobby.creatorId].balance += lobby.bet;
+      }
+      if (lobby.opponentId !== "BOT_BAR" && playerDb[lobby.opponentId]) {
+        playerDb[lobby.opponentId].balance -= lobby.bet;
+      } else if (lobby.opponentId === "BOT_BAR") {
+        playerDb[lobby.creatorId].balance += lobby.bet;
+      }
+      savePlayerDb();
+    } else if (lobby.roundsWonB >= 3) {
+      lobby.status = "finished";
+      lobby.winner = lobby.opponentId;
+      lobby.statusMessage = `Победный финал! ${lobby.opponentName} разгромил оппонента ${lobby.roundsWonB}:${lobby.roundsWonA}!`;
+      lobby.log.push(`🏆 ${lobby.opponentName} одержал окончательную победу!`);
+      
+      if (lobby.opponentId !== "BOT_BAR" && playerDb[lobby.opponentId]) {
+        playerDb[lobby.opponentId].balance += lobby.bet * 2;
+      } else if (lobby.opponentId === "BOT_BAR") {
+        lobby.log.push(`💸 Сталкер ${lobby.creatorName} оставляет ставку ${lobby.bet} RU у бармена.`);
+      }
+      savePlayerDb();
+    } else {
+      lobby.statusMessage = `Раунд позади! Счет во встречах ${lobby.roundsWonA}:${lobby.roundsWonB}. Следующий раунд уже в раздаче!`;
+      lobby.turn = lobby.creatorId;
+      rollPazaakStep(lobby);
+    }
+  }
+}
+
+// РЕЙТИНГ ДЛЯ АНОМАЛЬНЫХ КОСТЕЙ
+function evaluateDiceHand(dice: number[]) {
+  const counts: Record<number, number> = {};
+  dice.forEach(d => counts[d] = (counts[d] || 0) + 1);
+  const values = Object.values(counts).sort((a,b) => b-a);
+  const keys = Object.keys(counts).map(Number).sort((a,b) => b-a);
+  const totalSum = dice.reduce((a,b)=>a+b, 0);
+
+  const uniqueCount = Object.keys(counts).length;
+  const isStraight = uniqueCount === 5 && (Math.max(...dice) - Math.min(...dice) === 4);
+
+  if (values[0] === 5) return { rank: 8, name: "ПЯТЕРКА (ПОКЕР ЗОНЫ) 🌌", score: 5000 + keys[0] };
+  if (values[0] === 4) return { rank: 7, name: "КАРЕ (Четыре одинаковых) ⚡", score: 4000 + keys[0] * 10 };
+  if (values[0] === 3 && values[1] === 2) {
+    const tripVal = Number(Object.keys(counts).find(k => counts[Number(k)] === 3));
+    return { rank: 6, name: "ФУЛЛ-ХАУС (Три + Пара) 🏠", score: 3000 + tripVal * 10 };
+  }
+  if (isStraight) return { rank: 5, name: "СТРИТ (Последовательность) 📏", score: 2000 + Math.max(...dice) };
+  if (values[0] === 3) return { rank: 4, name: "ТРОЙКА (Три кости) 🕒", score: 1000 + keys[0] };
+  if (values[0] === 2 && values[1] === 2) {
+    const pairs = Object.keys(counts).filter(k => counts[Number(k)] === 2).map(Number).sort((a,b) => b-a);
+    return { rank: 3, name: "ДВЕ ПАРЫ 👥", score: 500 + pairs[0] * 10 + pairs[1] };
+  }
+  if (values[0] === 2) {
+    const pairVal = Number(Object.keys(counts).find(k => counts[Number(k)] === 2));
+    return { rank: 2, name: "ПАРА (Две одинаковых) 🤝", score: 200 + pairVal * 10 };
+  }
+  return { rank: 1, name: "СТАРШАЯ КОСТЬ 🎲", score: totalSum };
+}
+
 wss.on("connection", (ws) => {
   console.log("Новое сокет-подключение.");
 
@@ -67,7 +850,6 @@ wss.on("connection", (ws) => {
         case "JOIN": {
           const { id, username, role } = payload;
           
-          // Check if there's already an active GM if joining as GM
           if (role === "gm") {
             const activeGMId = getActiveGMId();
             if (activeGMId && activeGMId !== id) {
@@ -79,10 +861,12 @@ wss.on("connection", (ws) => {
             }
           }
 
+          // Инициализация кошелька / КПК профиля
+          initPlayerProfile(id, username);
+
           clients.set(ws, { id, username, role });
           console.log(`Пользователь ${username} вошел как ${role}`);
 
-          // Send current state
           ws.send(JSON.stringify({
             type: "INIT_STATE",
             payload: {
@@ -91,12 +875,20 @@ wss.on("connection", (ws) => {
               messages,
               stashLoot,
               artifactLoot,
-              hasActiveGM: getActiveGMId() !== null
+              hasActiveGM: getActiveGMId() !== null,
+              activeVotes,
+              activePlayersCount: getActivePlayersCount(),
+              playerDb,
+              pazaakLobbies,
+              activeRace
             }
           }));
 
-          // Broadcast players list of all open connections
           broadcastPlayersList();
+          // Также шлем СИНХРОНИЗАЦИЮ профилей всем
+          broadcastTavernGames();
+          // Sync votes immediately to any joining user
+          ws.send(JSON.stringify({ type: "VOTES_UPDATE", payload: { activeVotes, activePlayersCount: getActivePlayersCount() } }));
           break;
         }
 
@@ -104,27 +896,29 @@ wss.on("connection", (ws) => {
           const clientData = clients.get(ws);
           if (!clientData) return;
 
-          // Only GM can update state parameters like map, loot etc
-          if (clientData.role !== "gm") {
-            // But players should be able to trigger non-malicious state actions or sync player coordinates if needed
-            // Our app handles coordinate sync via onUpdateMap/broadcast. Let's let all messages through for now, 
-            // but update stored server-side copy.
-          }
-
           if (payload.gameState !== undefined) gameState = payload.gameState;
-          if (payload.map !== undefined) map = payload.map;
+          if (payload.map !== undefined) {
+            map = payload.map;
+            if (map && !map.playerPos) {
+              map.playerPos = { x: map.entrance.x, y: map.entrance.y };
+            }
+          }
           if (payload.messages !== undefined) messages = payload.messages;
           if (payload.stashLoot !== undefined) stashLoot = payload.stashLoot;
           if (payload.artifactLoot !== undefined) artifactLoot = payload.artifactLoot;
 
-          // Broadcast changes to all other clients
+          // Clear votes if starting/ended or resetting
+          if (payload.gameState === "playing" || payload.gameState === "setup") {
+            activeVotes = {};
+            broadcast("VOTES_UPDATE", { activeVotes, activePlayersCount: getActivePlayersCount() });
+          }
+
           broadcast("SYNC_APP_STATE", payload, ws);
           break;
         }
 
         case "FORCE_CLAIM_GM": {
           const { id, username } = payload;
-          // Kick other GM if any, assign role to this socket
           for (const [socket, player] of clients.entries()) {
             if (player.role === "gm" && player.id !== id) {
               player.role = "player";
@@ -149,9 +943,1143 @@ wss.on("connection", (ws) => {
               messages,
               stashLoot,
               artifactLoot,
-              hasActiveGM: getActiveGMId() !== null
+              hasActiveGM: getActiveGMId() !== null,
+              activeVotes,
+              activePlayersCount: getActivePlayersCount()
             }
           }));
+          break;
+        }
+
+        case "SUBMIT_VOTE": {
+          const player = clients.get(ws);
+          if (!player) return;
+
+          const { action } = payload;
+          // Track choice
+          activeVotes[player.id] = { username: player.username, action };
+
+          // Determine majority or unanimous status
+          const activePlayersCount = getActivePlayersCount();
+          const votesCastKeys = Object.keys(activeVotes);
+          const totalVotesCast = votesCastKeys.length;
+
+          // Sum votes per action type
+          const counts: Record<string, number> = {};
+          Object.values(activeVotes).forEach(v => {
+            counts[v.action] = (counts[v.action] || 0) + 1;
+          });
+
+          // Check if any option has > 50% of the active player list
+          let winningAction: string | null = null;
+          for (const [act, cnt] of Object.entries(counts)) {
+            if (cnt > activePlayersCount / 2) {
+              winningAction = act;
+              break;
+            }
+          }
+
+          // Alternatively, if everyone cast a vote but NO action has absolute > 50% majority (e.g. tie or split)
+          const allPlayersVoted = totalVotesCast >= activePlayersCount && activePlayersCount > 0;
+          if (!winningAction && allPlayersVoted) {
+            let maxVotes = -1;
+            for (const [act, cnt] of Object.entries(counts)) {
+              if (cnt > maxVotes) {
+                maxVotes = cnt;
+                winningAction = act;
+              }
+            }
+          }
+
+          // If action was executed, reset vote collection
+          if (winningAction) {
+            executeGameAction(winningAction);
+            activeVotes = {};
+            broadcast("VOTES_UPDATE", { activeVotes, activePlayersCount });
+            broadcast("SYNC_APP_STATE", { map, gameState, messages });
+          } else {
+            // Still waiting, just broadcast choices
+            broadcast("VOTES_UPDATE", { activeVotes, activePlayersCount });
+          }
+          break;
+        }
+
+        case "RESET_VOTES": {
+          activeVotes = {};
+          broadcast("VOTES_UPDATE", { activeVotes, activePlayersCount: getActivePlayersCount() });
+          break;
+        }
+
+        case "EXECUTE_IMMEDIATE_ACTION": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          const { action } = payload;
+          executeGameAction(action);
+
+          // Force broadcast updated state
+          broadcast("SYNC_APP_STATE", { map, gameState, messages });
+          break;
+        }
+
+        // ==========================================
+//         ТАВЕРНА И МИНИ-ИГРЫ КПК
+// ==========================================
+        case "TAVERN_PREPARE": {
+          ws.send(JSON.stringify({
+            type: "SYNC_TAVERN_GAMES",
+            payload: { pazaakLobbies, playerDb, activeRace, shopItems, tavernSettings }
+          }));
+          break;
+        }
+
+        case "PAZAAK_BUY_BOOSTER": {
+          if (!tavernSettings.enabledGames.pazaak) {
+            const player = clients.get(ws);
+            if (!player || player.role !== "gm") {
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Торговля картами Паазак временно заблокирована куратором!", type: "danger" } }));
+              return;
+            }
+          }
+          const { playerId, username } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+          if (profile.balance < 300) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на балансе КПК! Бустер стоит 300 RU.", type: "danger" } }));
+            return;
+          }
+          profile.balance -= 300;
+          
+          const premiumPool = ["+/-1", "+/-2", "+/-3", "+/-4", "+/-5", "+/-6", "D", "T", "+/-1 or 2", "2&4", "3&6"];
+          const pulled: string[] = [];
+          for (let i = 0; i < 3; i++) {
+            pulled.push(premiumPool[Math.floor(Math.random() * premiumPool.length)]);
+          }
+          profile.unlockedCards = [...profile.unlockedCards, ...pulled];
+          savePlayerDb();
+          
+          ws.send(JSON.stringify({
+            type: "BOOSTER_PULLED_SUCCESS",
+            payload: { pulled, profile }
+          }));
+          
+          appendSystemMessage(`🃏 ${username} приобрел бустер Паазака за 300 RU и вытащил: [${pulled.join(", ")}]!`, "loot");
+          broadcastTavernGames();
+          break;
+        }
+
+        case "PAZAAK_SAVE_DECK": {
+          const { playerId, deck } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+          if (deck.length === 8) {
+            profile.pazaakDeck = deck;
+            savePlayerDb();
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "✅ Колода Паазака успешно сохранена!", type: "success" } }));
+            broadcastTavernGames();
+          } else {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Ошибка: колода должна содержать ровно 8 карт!", type: "danger" } }));
+          }
+          break;
+        }
+
+        case "PAZAAK_CREATE_LOBBY": {
+          if (!tavernSettings.enabledGames.pazaak) {
+            const player = clients.get(ws);
+            if (!player || player.role !== "gm") {
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Дуэльный стол Паазака временно закрыт куратором!", type: "danger" } }));
+              return;
+            }
+          }
+          const { creatorId, creatorName, opponentId, bet } = payload;
+          const profile = playerDb[creatorId];
+          if (!profile) return;
+
+          const creatorDeck = [...(profile.pazaakDeck || [])];
+          if (creatorDeck.length < 8) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Ошибка: У вас выбрано меньше 8 карт! Сначала сохраните колоду.", type: "danger" } }));
+            return;
+          }
+
+          if (profile.balance < bet) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на КПК для совершения ставки!", type: "danger" } }));
+            return;
+          }
+
+          const lobbyId = "pz_" + Math.random().toString(36).substring(2, 9);
+          profile.balance -= bet;
+          savePlayerDb();
+
+          // Shuffled sub-array of 4 cards picked for matches
+          const getRandomSubarray = (arr: any[], size: number) => {
+            const shuffled = [...arr].sort(() => 0.5 - Math.random());
+            return shuffled.slice(0, size);
+          };
+
+          const playerAHands = getRandomSubarray(creatorDeck, 4);
+
+          // For bar bot, construct a baseline 8-card deck and select 4 random
+          const botDeckPool = ["+1", "-1", "+2", "-2", "+3", "-3", "+/-1", "+/-2", "D", "T"];
+          const botDeck8 = getRandomSubarray(botDeckPool, 8);
+          const playerBHands = opponentId === "BOT_BAR" ? getRandomSubarray(botDeck8, 4) : [];
+
+          const newLobby = {
+            id: lobbyId,
+            creatorId,
+            creatorName,
+            creatorDeck: creatorDeck,
+            opponentId: opponentId,
+            opponentName: opponentId === "BOT_BAR" ? "Харон (Бармен)" : null,
+            opponentDeck: opponentId === "BOT_BAR" ? botDeck8 : [],
+            bet,
+            status: opponentId === "BOT_BAR" ? "playing" : "waiting",
+            turn: creatorId,
+            playerAScore: 0,
+            playerBScore: 0,
+            playerAHands,
+            playerBHands,
+            playerAStand: false,
+            playerBStand: false,
+            playerABoard: [],
+            playerBBoard: [],
+            roundsWonA: 0,
+            roundsWonB: 0,
+            log: [`Начата встреча Паазак между ${creatorName} со ставкой ${bet} RU.`],
+            statusMessage: opponentId === "BOT_BAR" ? "Игра началась!" : "Ожидаем оппонента...",
+            winner: null
+          };
+
+          pazaakLobbies[lobbyId] = newLobby;
+          
+          if (opponentId === "BOT_BAR") {
+            rollPazaakStep(newLobby);
+          }
+
+          appendSystemMessage(`🎲 Сталкер ${creatorName} открыл стол Паазак со ставкой ${bet} RU.`, "info");
+          broadcastTavernGames();
+          break;
+        }
+
+        case "PAZAAK_JOIN_LOBBY": {
+          if (!tavernSettings.enabledGames.pazaak) {
+            const player = clients.get(ws);
+            if (!player || player.role !== "gm") {
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Дуэльный стол Паазака временно закрыт куратором!", type: "danger" } }));
+              return;
+            }
+          }
+          const { lobbyId, opponentId, opponentName } = payload;
+          const lobby = pazaakLobbies[lobbyId];
+          if (!lobby || lobby.status !== "waiting") return;
+
+          const profile = playerDb[opponentId];
+          if (!profile) return;
+
+          const oppDeck = [...(profile.pazaakDeck || [])];
+          if (oppDeck.length < 8) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Ошибка: У вас выбрано меньше 8 карт! Сначала сохраните колоду.", type: "danger" } }));
+            return;
+          }
+
+          if (profile.balance < lobby.bet) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на балансе КПК!", type: "danger" } }));
+            return;
+          }
+
+          profile.balance -= lobby.bet;
+          savePlayerDb();
+
+          const getRandomSubarray = (arr: any[], size: number) => {
+            const shuffled = [...arr].sort(() => 0.5 - Math.random());
+            return shuffled.slice(0, size);
+          };
+
+          lobby.opponentId = opponentId;
+          lobby.opponentName = opponentName;
+          lobby.opponentDeck = oppDeck;
+          lobby.playerBHands = getRandomSubarray(oppDeck, 4);
+          lobby.status = "playing";
+          lobby.statusMessage = "Оппонент подключился! Сдача первого раунда...";
+          lobby.log.push(`${opponentName} зашел во встречу. Ставки пополнены.`);
+
+          appendSystemMessage(`⚔️ Сталкер ${opponentName} принял дуэль в Паазак от ${lobby.creatorName} на ${lobby.bet} RU!`, "warning");
+          rollPazaakStep(lobby);
+          
+          broadcastTavernGames();
+          break;
+        }
+
+        case "PAZAAK_PLAY_CARD": {
+          const { lobbyId, playerId, cardIndex } = payload;
+          const lobby = pazaakLobbies[lobbyId];
+          if (!lobby || lobby.status !== "playing") return;
+          if (lobby.turn !== playerId) return;
+
+          const isA = playerId === lobby.creatorId;
+          const hand = isA ? lobby.playerAHands : lobby.playerBHands;
+          const card = hand[cardIndex];
+          if (!card) return;
+
+          let val = 0;
+          if (card.startsWith("+/-")) {
+            val = parseInt(card.replace("+/-", ""), 10) * (payload.useNegative ? -1 : 1);
+          } else if (card.startsWith("+")) {
+            val = parseInt(card.replace("+", ""), 10);
+          } else if (card.startsWith("-")) {
+            val = -parseInt(card.replace("-", ""), 10);
+          } else if (card === "D") {
+            const board = isA ? lobby.playerABoard : lobby.playerBBoard;
+            const last = board[board.length - 1] || 0;
+            val = last;
+          } else if (card === "T") {
+            val = 0;
+          }
+
+          if (isA) {
+            lobby.playerABoard.push(val);
+            if (card === "T") lobby.playerABoard.push("T");
+            lobby.playerAScore = lobby.playerABoard.filter((c: any) => typeof c === 'number').reduce((sum: number, b: number) => sum + b, 0);
+            lobby.playerAHands[cardIndex] = null;
+            lobby.log.push(`${lobby.creatorName} сыграл карту [${card}] (эффект: ${val > 0 ? '+' : ''}${val}). Счет: ${lobby.playerAScore}`);
+          } else {
+            lobby.playerBBoard.push(val);
+            if (card === "T") lobby.playerBBoard.push("T");
+            lobby.playerBScore = lobby.playerBBoard.filter((c: any) => typeof c === 'number').reduce((sum: number, b: number) => sum + b, 0);
+            lobby.playerBHands[cardIndex] = null;
+            lobby.log.push(`${lobby.opponentName} сыграл карту [${card}] (эффект: ${val > 0 ? '+' : ''}${val}). Счет: ${lobby.playerBScore}`);
+          }
+
+          broadcastTavernGames();
+          break;
+        }
+
+        case "PAZAAK_END_TURN": {
+          const { lobbyId, playerId } = payload;
+          const lobby = pazaakLobbies[lobbyId];
+          if (!lobby || lobby.status !== "playing") return;
+          if (lobby.turn !== playerId) return;
+
+          const isA = playerId === lobby.creatorId;
+          const nextPlayerId = isA ? lobby.opponentId : lobby.creatorId;
+          
+          lobby.turn = nextPlayerId;
+          lobby.log.push(`${isA ? lobby.creatorName : lobby.opponentName} завершает ход.`);
+
+          checkPazaakRoundEnd(lobby);
+
+          if (lobby.status === "playing") {
+            rollPazaakStep(lobby);
+          }
+
+          broadcastTavernGames();
+          break;
+        }
+
+        case "PAZAAK_STAND": {
+          const { lobbyId, playerId } = payload;
+          const lobby = pazaakLobbies[lobbyId];
+          if (!lobby || lobby.status !== "playing") return;
+          if (lobby.turn !== playerId) return;
+
+          const isA = playerId === lobby.creatorId;
+          if (isA) {
+            lobby.playerAStand = true;
+            lobby.log.push(`${lobby.creatorName} зафиксировал счет на STAND (${lobby.playerAScore})`);
+          } else {
+            lobby.playerBStand = true;
+            lobby.log.push(`${lobby.opponentName} зафиксировал счет на STAND (${lobby.playerBScore})`);
+          }
+
+          checkPazaakRoundEnd(lobby);
+
+          if (lobby.status === "playing") {
+            lobby.turn = isA ? lobby.opponentId : lobby.creatorId;
+            rollPazaakStep(lobby);
+          }
+
+          broadcastTavernGames();
+          break;
+        }
+
+        case "PAZAAK_CONCEDE": {
+          const { lobbyId, playerId } = payload;
+          const lobby = pazaakLobbies[lobbyId];
+          if (!lobby || lobby.status !== "playing") return;
+
+          const isA = playerId === lobby.creatorId;
+          lobby.status = "finished";
+          lobby.winner = isA ? lobby.opponentId : lobby.creatorId;
+          lobby.statusMessage = `${isA ? lobby.creatorName : lobby.opponentName} признал поражение сдачей.`;
+          lobby.log.push(`⚠️ ${isA ? lobby.creatorName : lobby.opponentName} капитулировал.`);
+
+          if (lobby.winner !== "BOT_BAR") {
+            if (playerDb[lobby.winner]) {
+              playerDb[lobby.winner].balance += lobby.bet * 2;
+            }
+          }
+          savePlayerDb();
+
+          broadcastTavernGames();
+          break;
+        }
+
+        case "DICE_PLAY_BOT": {
+          if (!tavernSettings.enabledGames.dice) {
+            const player = clients.get(ws);
+            if (!player || player.role !== "gm") {
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Игра в кости на КПК временно закрыта куратором!", type: "danger" } }));
+              return;
+            }
+          }
+          const { playerId, username, bet } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+          if (profile.balance < bet) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на балансе КПК!", type: "danger" } }));
+            return;
+          }
+
+          profile.balance -= bet;
+          savePlayerDb();
+
+          const botDice = Array.from({ length: 5 }, () => Math.floor(Math.random() * 6) + 1);
+          const playerDice = Array.from({ length: 5 }, () => Math.floor(Math.random() * 6) + 1);
+
+          const botHand = evaluateDiceHand(botDice);
+          const playerHand = evaluateDiceHand(playerDice);
+
+          ws.send(JSON.stringify({
+            type: "DICE_STATE_SYNC",
+            payload: {
+              active: true,
+              bet,
+              botDice,
+              playerDice,
+              botHand,
+              playerHand,
+              rerollStep: 1,
+              lockedIndexes: [false, false, false, false, false]
+            }
+          }));
+
+          appendSystemMessage(`🎲 Сталкер ${username} бросает кости против бармена на ${bet} RU.`, "info");
+          break;
+        }
+
+        case "DICE_REROLL": {
+          const { playerId, username, bet, playerDice, lockedIndexes, botDice, rerollStep } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+
+          // Perform reroll on the user's unlocked dice
+          const finalPlayerDice = playerDice.map((val: number, i: number) => {
+            return lockedIndexes[i] ? val : Math.floor(Math.random() * 6) + 1;
+          });
+
+          // Perform reroll on the chatbot's unlocked dice
+          const botCounts: Record<number, number> = {};
+          botDice.forEach((d: number) => botCounts[d] = (botCounts[d] || 0) + 1);
+          const botMaxCount = Math.max(...Object.values(botCounts));
+          const targetToLock = Number(Object.keys(botCounts).find(k => botCounts[Number(k)] === botMaxCount));
+          
+          const finalBotDice = botDice.map((val: number) => {
+            if (botMaxCount > 1 && val === targetToLock) return val;
+            if (botMaxCount === 1 && val === Math.max(...botDice)) return val;
+            return Math.floor(Math.random() * 6) + 1;
+          });
+
+          const currentStep = rerollStep || 1;
+
+          if (currentStep === 1) {
+            // First reroll completed. Move to step 2, keep game active, clear user locks for the next decision
+            ws.send(JSON.stringify({
+              type: "DICE_STATE_SYNC",
+              payload: {
+                active: true,
+                bet,
+                botDice: finalBotDice,
+                playerDice: finalPlayerDice,
+                botHand: evaluateDiceHand(finalBotDice),
+                playerHand: evaluateDiceHand(finalPlayerDice),
+                rerollStep: 2,
+                lockedIndexes: [false, false, false, false, false]
+              }
+            }));
+            appendSystemMessage(`🎲 Сталкер ${username} совершил первый переброс костей. Ожидается финальный ход.`, "info");
+          } else {
+            // Second reroll completed. Proceed to final round evaluation (step 3)
+            const finalBotHand = evaluateDiceHand(finalBotDice);
+            const finalPlayerHand = evaluateDiceHand(finalPlayerDice);
+
+            let result: "win" | "lose" | "tie" = "lose";
+            let prize = 0;
+            let message = "";
+
+            if (finalPlayerHand.rank > finalBotHand.rank) {
+              result = "win";
+            } else if (finalPlayerHand.rank < finalBotHand.rank) {
+              result = "lose";
+            } else {
+              if (finalPlayerHand.score > finalBotHand.score) {
+                result = "win";
+              } else if (finalPlayerHand.score < finalBotHand.score) {
+                result = "lose";
+              } else {
+                result = "tie";
+              }
+            }
+
+            if (result === "win") {
+              prize = bet * 2;
+              profile.balance += prize;
+              message = `🎉 ВЫ ВЫИГРАЛИ! Ваши [${finalPlayerHand.name}] уделали кости бармена [${finalBotHand.name}]! +${bet} RU!`;
+              appendSystemMessage(`🎉 Сталкер ${username} выиграл +${bet} RU у бармена в Кости со счетом [${finalPlayerHand.name}]!`, "success");
+            } else if (result === "lose") {
+              prize = 0;
+              message = `💸 Увы! Бармен обыграл вас своей рукой [${finalBotHand.name}] против ваших [${finalPlayerHand.name}].`;
+              appendSystemMessage(`💸 Сталкер ${username} проиграл ставку в кости бармену (проиграл с ${finalPlayerHand.name} против ${finalBotHand.name}).`, "info");
+            } else {
+              prize = bet;
+              profile.balance += prize;
+              message = `🤝 Ничья! Кости сошлись в комбинации [${finalPlayerHand.name}]. Ставка возвращена.`;
+            }
+
+            savePlayerDb();
+
+            ws.send(JSON.stringify({
+              type: "DICE_STATE_SYNC",
+              payload: {
+                active: true,
+                bet,
+                botDice: finalBotDice,
+                playerDice: finalPlayerDice,
+                botHand: finalBotHand,
+                playerHand: finalPlayerHand,
+                rerollStep: 3,
+                result,
+                message,
+                lockedIndexes
+              }
+            }));
+
+            broadcastTavernGames();
+          }
+          break;
+        }
+
+        case "RACE_PLACE_BET": {
+          if (!tavernSettings.enabledGames.races) {
+            const player = clients.get(ws);
+            if (!player || player.role !== "gm") {
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Тотализатор скачек временно заблокирован куратором бара!", type: "danger" } }));
+              return;
+            }
+          }
+          const { playerId, username, contestantName, betAmount } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+
+          if (activeRace.status !== "betting" && activeRace.status !== "none") {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Ставки на этот заезд уже закрыты!", type: "danger" } }));
+            return;
+          }
+
+          if (profile.balance < betAmount) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на КПК!", type: "danger" } }));
+            return;
+          }
+
+          activeRace.status = "betting";
+          profile.balance -= betAmount;
+          savePlayerDb();
+
+          activeRace.bets.push({ playerId, username, contestantName, betAmount });
+          activeRace.log.push(`📝 Ставка: ${username} зарядил ${betAmount} RU на "${contestantName}"`);
+
+          broadcastTavernGames();
+          break;
+        }
+
+        case "RACE_SET_CONTESTANTS": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          const { names } = payload;
+          if (Array.isArray(names) && names.length >= 2) {
+            activeRace.contestants = names.map((name, i) => {
+              const types: ("favorite"|"balanced"|"underdog")[] = ["favorite", "balanced", "balanced", "underdog"];
+              const muls = [1.8, 3.4, 4.8, 9.5];
+              return {
+                name,
+                position: 0,
+                odds: muls[i % muls.length],
+                color: ["text-amber-500", "text-emerald-500", "text-yellow-500", "text-cyan-500"][i % 4],
+                type: types[i % types.length]
+              };
+            });
+            activeRace.log.push(`🛠️ Куратор обновил список участников забегов!`);
+            broadcastTavernGames();
+          }
+          break;
+        }
+
+        case "RACE_START_GM": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          if (activeRace.status !== "betting" || activeRace.bets.length === 0) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Нет принятых ставок для начала забега!", type: "danger" } }));
+            return;
+          }
+
+          activeRace.status = "running";
+          activeRace.winner = null;
+          activeRace.tickCount = 0;
+          activeRace.contestants.forEach(c => c.position = 0);
+          activeRace.log = [`🏁 КУРАТОР ДАЛ СТАРТ ЗАБЕГУ! Звери ринулись вперед!`];
+          appendSystemMessage(`🏁 НАЧАЛИСЬ ПОДПОЛЬНЫЕ СКАЧКИ ТАВЕРНЫ! Твари пущены!`, "warning");
+
+          broadcastTavernGames();
+
+          const raceInterval = setInterval(() => {
+            activeRace.tickCount++;
+            let finishReached = false;
+
+            activeRace.contestants.forEach(c => {
+              let delta = 0;
+              let eventMsg = "";
+              
+              if (c.type === "favorite") {
+                delta = Math.floor(Math.random() * 3) + 2; // 2-4
+                if (Math.random() < 0.20) {
+                  delta += 2;
+                  if (Math.random() < 0.15) eventMsg = `🔥 ${c.name} почуял азарт и прибавил ходу!`;
+                }
+                if (Math.random() < 0.15) {
+                  delta -= 1;
+                  if (Math.random() < 0.15) eventMsg = `💨 ${c.name} попал в пылевой вихрь.`;
+                }
+              } else if (c.type === "balanced") {
+                delta = Math.floor(Math.random() * 3) + 1; // 1-3
+                if (Math.random() < 0.35) {
+                  delta += 3;
+                  if (Math.random() < 0.20) eventMsg = `⚡ ${c.name} совершает отличный рывок!`;
+                }
+                if (Math.random() < 0.15) {
+                  delta -= 1;
+                  if (Math.random() < 0.15) eventMsg = `⚠️ ${c.name} притормозил перед воронкой.`;
+                }
+              } else if (c.type === "underdog") {
+                delta = Math.floor(Math.random() * 2) + 1; // 1-2
+                if (Math.random() < 0.45) {
+                  delta += 4;
+                  if (Math.random() < 0.25) eventMsg = `🚀 АНОМАЛЬНЫЙ УСКОРИТЕЛЬ! ${c.name} буквально летит вперед!`;
+                }
+                if (Math.random() < 0.20) {
+                  delta -= 2;
+                  if (Math.random() < 0.20) eventMsg = `🐾 ${c.name} споткнулся и замедлился.`;
+                }
+              }
+
+              delta = Math.max(0, delta);
+              c.position = Math.min(100, c.position + delta);
+
+              if (eventMsg && activeRace.tickCount % 2 === 0) {
+                activeRace.log.push(eventMsg);
+              }
+
+              if (c.position >= 100) {
+                finishReached = true;
+              }
+            });
+
+            const sorted = [...activeRace.contestants].sort((a,b) => b.position - a.position);
+            if (activeRace.tickCount % 3 === 0) {
+              activeRace.log.push(`🏃 Лидер забега: "${sorted[0].name}" (пройдено ${sorted[0].position}%)`);
+            }
+
+            if (finishReached) {
+              clearInterval(raceInterval);
+              const finalSorted = [...activeRace.contestants].sort((a,b) => b.position - a.position);
+              const winner = finalSorted[0];
+              activeRace.winner = winner.name;
+              activeRace.status = "finished";
+              activeRace.log.push(`🏆 ПОБЕДИТЕЛЬ ЗАБЕГА: "${winner.name}"!`);
+              appendSystemMessage(`🏁 Скачки: Победил "${winner.name}"!`, "success");
+
+              activeRace.bets.forEach(b => {
+                if (b.contestantName === winner.name) {
+                  const winnings = Math.floor(b.betAmount * winner.odds);
+                  if (playerDb[b.playerId]) {
+                    playerDb[b.playerId].balance += winnings;
+                    activeRace.log.push(`💰 ${b.username} забирает выплату: +${winnings} RU (кэф ${winner.odds}x)!`);
+                    appendSystemMessage(`💰 Сталкер ${b.username} сорвал куш в ${winnings} RU на "${winner.name}"!`, "loot");
+                  }
+                } else {
+                  activeRace.log.push(`🥀 ${b.username} проиграл свою ставку на ${b.contestantName}`);
+                }
+              });
+
+              savePlayerDb();
+            }
+
+            broadcastTavernGames();
+          }, 700);
+          break;
+        }
+
+        case "RACE_RESET_GM": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          activeRace.status = "none";
+          activeRace.bets = [];
+          activeRace.winner = null;
+          activeRace.log = ["Заезд очищен и готов к новым ставкам."];
+          activeRace.contestants.forEach(c => c.position = 0);
+          
+          broadcastTavernGames();
+          break;
+        }
+
+        case "BAR_SELL_ITEM": {
+          if (!tavernSettings.enabledGames.trades) {
+            const player = clients.get(ws);
+            if (!player || player.role !== "gm") {
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Торговая скупка Сидоровича временно закрыта куратором!", type: "danger" } }));
+              return;
+            }
+          }
+          const { playerId, username, itemIndex } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+          if (!map || !map.inventory || !map.inventory[itemIndex]) return;
+
+          const itemName = map.inventory[itemIndex];
+          
+          let price = 200;
+          const artifactNames = ["Капля", "Кровь камня", "Слизь", "Колючка", "Медуза", "Вспышка", "Кристалл", "Бенгальский огонь", "Ночной Светоч"];
+          const isArtifact = artifactNames.some(art => itemName.includes(art));
+          if (isArtifact) {
+            price = Math.floor(Math.random() * 400) + 600;
+          } else {
+            price = Math.floor(Math.random() * 100) + 150;
+          }
+
+          profile.balance += price;
+          savePlayerDb();
+
+          map.inventory.splice(itemIndex, 1);
+
+          appendSystemMessage(`🤝 Сталкер ${username} сдал Сидоровичу хабар: "${itemName}" за ${price} RU!`, "loot");
+          
+          broadcast("SYNC_APP_STATE", { map, gameState, messages });
+          broadcastTavernGames();
+          break;
+        }
+
+        case "GM_MODIFY_BALANCE": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          const { targetPlayerId, delta } = payload;
+          const profile = playerDb[targetPlayerId];
+          if (profile) {
+            profile.balance = Math.max(0, profile.balance + delta);
+            savePlayerDb();
+            appendSystemMessage(`⚙️ Система: Баланс игрока был отрегулирован куратором на ${delta > 0 ? '+' : ''}${delta} RU.`, "info");
+            broadcastTavernGames();
+          }
+          break;
+        }
+
+        case "GM_SET_PLAYER_BALANCE": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          const { targetPlayerId, balance } = payload;
+          const profile = playerDb[targetPlayerId];
+          if (profile) {
+            profile.balance = Math.max(0, parseInt(balance, 10) || 0);
+            savePlayerDb();
+            appendSystemMessage(`🛡️ База данных: Куратор установил баланс у игрока на ${profile.balance} RU.`, "info");
+            broadcastTavernGames();
+          }
+          break;
+        }
+
+        case "GM_UNLOCK_PLAYER_CARDS": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          const { targetPlayerId, card } = payload;
+          const profile = playerDb[targetPlayerId];
+          if (profile && card) {
+            if (!profile.unlockedCards.includes(card)) {
+              profile.unlockedCards.push(card);
+              savePlayerDb();
+              appendSystemMessage(`🛡️ База данных: Куратор открыл карту [${card}] игроку.`, "info");
+              broadcastTavernGames();
+            }
+          }
+          break;
+        }
+
+         case "GM_RESET_PLAYER_PROFILE": {
+           const player = clients.get(ws);
+           if (!player || player.role !== "gm") return;
+
+           const { targetPlayerId } = payload;
+           if (playerDb[targetPlayerId]) {
+             const oldName = playerDb[targetPlayerId]?.userName;
+             playerDb[targetPlayerId] = {
+               userName: oldName,
+               balance: 1000,
+               unlockedCards: ["+1", "-1", "+2", "-2", "+3", "-3", "+4", "-4", "+5", "-5"],
+               pazaakDeck: []
+             };
+             savePlayerDb();
+             appendSystemMessage(`🛡️ База данных: Куратор сбросил профиль игрока к начальным значениям!`, "info");
+             broadcastTavernGames();
+           }
+           break;
+         }
+
+        case "GM_ADD_SHOP_ITEM": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          const { name, price, type, description } = payload;
+          const newItem = {
+            id: "item_" + Math.random().toString(36).substring(2, 9),
+            name,
+            price: parseInt(price, 10) || 120,
+            type: type || "misc",
+            description: description || "Специальный заказ КПК"
+          };
+          shopItems.push(newItem);
+          saveShopItems();
+          appendSystemMessage(`🛒 Торговля: Куратор добавил новый товар у Сидоровича: "${name}" за ${price} RU!`, "info");
+          broadcastTavernGames();
+          break;
+        }
+
+        case "GM_DELETE_SHOP_ITEM": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          const { itemId } = payload;
+          const found = shopItems.find(i => i.id === itemId);
+          if (found) {
+            shopItems = shopItems.filter(i => i.id !== itemId);
+            saveShopItems();
+            appendSystemMessage(`🗑️ Торговля: Куратор убрал товар "${found.name}" с прилавка Сидоровича.`, "info");
+            broadcastTavernGames();
+          }
+          break;
+        }
+
+        case "GM_UPDATE_TAVERN_SETTINGS": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          const { tavernName, enabledGames } = payload;
+          if (tavernName !== undefined) {
+            tavernSettings.tavernName = tavernName;
+            appendSystemMessage(`⚙️ Заведение: Бар переименован в "${tavernName}"`, "warning");
+          }
+          if (enabledGames !== undefined) {
+            tavernSettings.enabledGames = enabledGames;
+            appendSystemMessage(`⚙️ Заведение: Куратор переключил правила доступности игр Зоны.`, "info");
+          }
+          
+          saveTavernSettings();
+          broadcastTavernGames();
+          break;
+        }
+
+        case "BUY_SHOP_ITEM": {
+          if (!tavernSettings.enabledGames.trades) {
+            const player = clients.get(ws);
+            if (!player || player.role !== "gm") {
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Торговая лавка Сидоровича временно закрыта куратором!", type: "danger" } }));
+              return;
+            }
+          }
+          const { playerId, username, itemId } = payload;
+          const profile = playerDb[playerId];
+          const item = shopItems.find(i => i.id === itemId);
+          if (!profile || !item) return;
+
+          if (profile.balance < item.price) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на счете КПК!", type: "danger" } }));
+            return;
+          }
+
+          if (!map) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Ошибка: Экспедиция еще не запущена! В рюкзак отряда сейчас положить нельзя.", type: "danger" } }));
+            return;
+          }
+
+          profile.balance -= item.price;
+          savePlayerDb();
+
+          if (!map.inventory) {
+            map.inventory = [];
+          }
+          map.inventory.push(item.name);
+
+          appendSystemMessage(`🛒 Сталкер ${username} купил у Сидоровича: "${item.name}" за ${item.price} RU!`, "loot");
+          
+          broadcast("SYNC_APP_STATE", { map, gameState, messages });
+          broadcastTavernGames();
+          break;
+        }
+
+        case "GM_ADD_TO_INVENTORY": {
+          const player = clients.get(ws);
+          if (!player || player.role !== "gm") return;
+
+          const { itemName } = payload;
+          if (!map) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Экспедиция не запущена!", type: "danger" } }));
+            return;
+          }
+          if (!map.inventory) {
+            map.inventory = [];
+          }
+          map.inventory.push(itemName);
+          appendSystemMessage(`📦 Рюкзак: Куратор напрямую добавил "${itemName}" в рюкзак отряда!`, "loot");
+          broadcast("SYNC_APP_STATE", { map, gameState, messages });
+          break;
+        }
+
+        case "SLOTS_SPIN": {
+          if (!tavernSettings.enabledGames.slots) {
+            const player = clients.get(ws);
+            if (!player || player.role !== "gm") {
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Игровой автомат 'Реактор-Слот' временно отключен куратором!", type: "danger" } }));
+              return;
+            }
+          }
+          const { playerId, bet } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+          const activeClient = clients.get(ws);
+          const activeUsername = activeClient ? activeClient.username : "Сталкер";
+          if (profile.balance < bet) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно RU на балансе!", type: "danger" } }));
+            return;
+          }
+
+          profile.balance -= bet;
+
+          const symbols = ["⚙️", "⚙️", "⚙️", "🥫", "🥫", "🍾", "🍾", "💎", "☢️", "💀"];
+          const r1 = symbols[Math.floor(Math.random() * symbols.length)];
+          const r2 = symbols[Math.floor(Math.random() * symbols.length)];
+          const r3 = symbols[Math.floor(Math.random() * symbols.length)];
+          const reels = [r1, r2, r3];
+
+          let winMultiplier = 0;
+          let combinationName = "Без совпадений";
+
+          if (r1 === r2 && r2 === r3) {
+            if (r1 === "☢️") {
+              winMultiplier = 15;
+              combinationName = "ТРИ РАДИАЦИИ (Генератор Сверхпроводников!) ☢️☢️☢️";
+            } else if (r1 === "💎") {
+              winMultiplier = 10;
+              combinationName = "ТРИ ЗОЛОТЫХ АРТЕФАКТА! 💎💎💎";
+            } else if (r1 === "🍾") {
+              winMultiplier = 6;
+              combinationName = "БАТАРЕЯ ВОДКИ «КАЗАКИ» 🍾🍾🍾";
+            } else if (r1 === "🥫") {
+              winMultiplier = 4;
+              combinationName = "АРМЕЙСКИЙ ЗАПАС СУХПАЙКА 🥫🥫🥫";
+            } else if (r1 === "⚙️") {
+              winMultiplier = 3;
+              combinationName = "НАБОР ОПОРНЫХ БОЛТОВ ⚙️⚙️⚙️";
+            } else if (r1 === "💀") {
+              winMultiplier = 2.5;
+              combinationName = "МЕРТВАЯ ПЕТЛЯ ХАРОНА 💀💀💀";
+            }
+          } else if (r1 === r2 || r2 === r3 || r1 === r3) {
+            const pairSymbol = (r1 === r2 || r1 === r3) ? r1 : r2;
+            if (pairSymbol === "☢️") {
+              winMultiplier = 1.8;
+              combinationName = "Двойная Радиация ☢️";
+            } else if (pairSymbol === "💎") {
+              winMultiplier = 1.5;
+              combinationName = "Два Артефакта 💎";
+            } else if (pairSymbol === "🍾") {
+              winMultiplier = 1.3;
+              combinationName = "Пара Бутылок Водки";
+            } else {
+              winMultiplier = 1.1;
+              combinationName = "Скромная Пара";
+            }
+          }
+
+          const winAmount = Math.floor(bet * winMultiplier);
+          if (winAmount > 0) {
+            profile.balance += winAmount;
+          }
+          savePlayerDb();
+
+          ws.send(JSON.stringify({
+            type: "SLOTS_RESULT",
+            payload: {
+              reels,
+              winAmount,
+              message: winAmount > 0 
+                ? `🎉 ПОБЕДА! Вы выбили [${combinationName}] и выиграли +${winAmount} RU!`
+                : `💸 Увы! Выпало: ${reels.join(" | ")}. Ни единой зацепки. Попробуйте еще раз!`
+            }
+          }));
+
+          if (winAmount >= bet * 5) {
+            appendSystemMessage(`🎰 Слот-Машина: Сталкер ${activeUsername} сорвал куш в размере ${winAmount} RU на автомате («${combinationName}»)!`, "success");
+          }
+
+          broadcastTavernGames();
+          break;
+        }
+
+        case "ROULETTE_SPIN": {
+          if (!tavernSettings.enabledGames.roulette) {
+            const player = clients.get(ws);
+            if (!player || player.role !== "gm") {
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Военная радар-рулетка временно отключена куратором!", type: "danger" } }));
+              return;
+            }
+          }
+          const { playerId, betAmount, betType, betValue } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+          const activeClient = clients.get(ws);
+          const activeUsername = activeClient ? activeClient.username : "Сталкер";
+          if (profile.balance < betAmount) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на балансе КПК!", type: "danger" } }));
+            return;
+          }
+
+          profile.balance -= betAmount;
+
+          const winningNumber = Math.floor(Math.random() * 37);
+          const getReds = () => [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
+          const color = winningNumber === 0 ? "green" : getReds().includes(winningNumber) ? "red" : "black";
+
+          let isWin = false;
+          let winMultiplier = 0;
+
+          if (betType === "number") {
+            if (winningNumber === parseInt(betValue)) {
+              isWin = true;
+              winMultiplier = 35;
+            }
+          } else if (betType === "color") {
+            if (color === betValue) {
+              isWin = true;
+              winMultiplier = 2;
+            }
+          } else if (betType === "parity") {
+            if (winningNumber !== 0) {
+              const isEven = winningNumber % 2 === 0;
+              if (betValue === "even" && isEven) {
+                isWin = true;
+                winMultiplier = 2;
+              } else if (betValue === "odd" && !isEven) {
+                isWin = true;
+                winMultiplier = 2;
+              }
+            }
+          }
+
+          const winAmount = isWin ? Math.floor(betAmount * winMultiplier) : 0;
+          if (winAmount > 0) {
+            profile.balance += winAmount;
+          }
+          savePlayerDb();
+
+          const colorLabel = winningNumber === 0 ? "🟢 ЗЕРО (0)" : color === "red" ? `🔴 КРАСНОЕ (${winningNumber})` : `⚫ ЧЕРНОЕ (${winningNumber})`;
+          
+          ws.send(JSON.stringify({
+            type: "ROULETTE_RESULT",
+            payload: {
+              winningNumber,
+              winningColor: color,
+              winAmount,
+              message: winAmount > 0 
+                ? `🎯 ВЫИГРЫШ! Выпало ${colorLabel}. Ваша ставка принесла вам +${winAmount} RU!`
+                : `💸 ПРОИГРЫШ! Выпало ${colorLabel}. Удача ускользнула глубоко под радар.`
+            }
+          }));
+
+          if (winAmount >= betAmount * 5) {
+            appendSystemMessage(`🎡 Рулетка: Сталкер ${activeUsername} поставил на "${betValue}" и поднял +${winAmount} RU на радар-рулетке! Выпало: ${colorLabel}`, "success");
+          }
+
+          broadcastTavernGames();
+          break;
+        }
+
+        case "SHOOTING_RANGE_FINISH": {
+          if (!tavernSettings.enabledGames.shooting) {
+            const player = clients.get(ws);
+            if (!player || player.role !== "gm") {
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Стрелковый тир временно опечатан куратором!", type: "danger" } }));
+              return;
+            }
+          }
+          const { playerId, bet, score } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+          const activeClient = clients.get(ws);
+          const activeUsername = activeClient ? activeClient.username : "Сталкер";
+          if (profile.balance < bet) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на балансе КПК!", type: "danger" } }));
+            return;
+          }
+
+          profile.balance -= bet;
+
+           let mult = 0;
+           let rank = "Новичок";
+           if (score >= 250) {
+             mult = 1.8;
+             rank = "🏆 Легендарный Стрелок";
+           } else if (score >= 150) {
+             mult = 1.2;
+             rank = "🎯 Снайпер Зоны";
+           } else if (score >= 80) {
+             mult = 0.8;
+             rank = "🔫 Меткий Стрелок";
+           } else {
+             mult = 0;
+             rank = "Слепой Окорок (Потренируйтесь ещё!)";
+           }
+
+          const winAmount = Math.floor(bet * mult);
+          if (winAmount > 0) {
+            profile.balance += winAmount;
+          }
+          savePlayerDb();
+
+          ws.send(JSON.stringify({
+            type: "SHOOTING_RANGE_RESULT",
+            payload: {
+              winAmount,
+              message: winAmount > 0
+                ? `🎖️ РЕЗУЛЬТАТ: Набрано ${score} очков (Звание: ${rank}). Вы получили выплату +${winAmount} RU!`
+                : `❌ РЕЗУЛЬТАТ: Набрано ${score} очков. Слишком много промахов (Звание: ${rank}). Ставка ушла бармену.`
+            }
+          }));
+
+          if (winAmount >= bet * 1.5) {
+            appendSystemMessage(`🎯 Тир: Сталкер ${activeUsername} прошел боевую тренировку в Тире с рангом [${rank}] и выиграл +${winAmount} RU!`, "success");
+          }
+
+          broadcastTavernGames();
           break;
         }
       }
@@ -165,6 +2093,8 @@ wss.on("connection", (ws) => {
     if (player) {
       console.log(`Пользователь ${player.username} отключился.`);
       clients.delete(ws);
+      delete activeVotes[player.id];
+      broadcast("VOTES_UPDATE", { activeVotes, activePlayersCount: getActivePlayersCount() });
       broadcastPlayersList();
     }
   });
@@ -178,6 +2108,10 @@ function broadcastPlayersList() {
 
 // Set up server assets / Dev server
 async function startServer() {
+  app.get("/api/profiles", (req, res) => {
+    res.json(Object.keys(playerDb));
+  });
+
   // Vite dev server mounting in development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

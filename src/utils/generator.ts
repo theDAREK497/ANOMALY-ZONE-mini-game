@@ -14,6 +14,8 @@ export interface Cell {
   isScannedForRadiation: boolean;
   isScannedByBolt: boolean;
   hasExpanded?: boolean;
+  isApproximateLocation?: boolean;
+  isOutOfBounds?: boolean;
 }
 
 export interface GameMap {
@@ -21,6 +23,18 @@ export interface GameMap {
   height: number;
   grid: Cell[][];
   entrance: {x: number, y: number};
+  maxHealth: number;
+  health: number;
+  maxRadiation: number;
+  radiation: number;
+  geigerCharges: number;
+  detectorCharges: number;
+  detectorLevel: number;
+  timerSeconds: number;
+  boltCharges: number;
+  playerPos?: {x: number, y: number};
+  activeDirectionHighlight?: string | null;
+  inventory?: string[];
 }
 
 export interface GenerationParams {
@@ -34,6 +48,12 @@ export interface GenerationParams {
   salt: string;
   allowedAnomalies: AnomalyType[];
   radiationPercentage: number;
+  maxHealth: number;
+  maxRadiation: number;
+  geigerCharges: number;
+  detectorCharges: number;
+  detectorLevel: number;
+  boltCharges: number;
 }
 
 export function generateMap(params: GenerationParams): GameMap {
@@ -183,6 +203,16 @@ export function generateMap(params: GenerationParams): GameMap {
     width: params.width,
     height: params.height,
     grid,
-    entrance: {x: entranceX, y: entranceY}
+    entrance: {x: entranceX, y: entranceY},
+    maxHealth: params.maxHealth,
+    health: params.maxHealth,
+    maxRadiation: params.maxRadiation,
+    radiation: 0,
+    geigerCharges: params.geigerCharges,
+    detectorCharges: params.detectorCharges,
+    detectorLevel: params.detectorLevel,
+    timerSeconds: 60,
+    boltCharges: params.boltCharges,
+    inventory: []
   };
 }

@@ -23,6 +23,12 @@ export function Setup({ onGenerate, stashLoot, setStashLoot, artifactLoot, setAr
     salt: 'STALKER',
     allowedAnomalies: ['fire', 'trampoline', 'sphere', 'electric', 'vortex', 'time_loop'],
     radiationPercentage: 30,
+    maxHealth: 100,
+    maxRadiation: 100,
+    geigerCharges: 3,
+    detectorCharges: 3,
+    detectorLevel: 2,
+    boltCharges: 10,
   });
 
   const handleAnomalyToggle = (id: AnomalyType) => {
@@ -34,11 +40,11 @@ export function Setup({ onGenerate, stashLoot, setStashLoot, artifactLoot, setAr
     });
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     setParams(prev => ({
       ...prev,
-      [name]: type === 'number' ? Number(value) : value
+      [name]: type === 'number' || name === 'detectorLevel' || name === 'maxHealth' || name === 'maxRadiation' || name === 'geigerCharges' || name === 'detectorCharges' || name === 'boltCharges' ? Number(value) : value
     }));
   };
 
@@ -168,6 +174,47 @@ export function Setup({ onGenerate, stashLoot, setStashLoot, artifactLoot, setAr
             max="100" 
             className="w-full accent-green-500" 
           />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-mono text-emerald-500 mb-1">⚡ Здоровье Партии (HP)</label>
+            <input type="number" name="maxHealth" value={params.maxHealth} onChange={handleChange} min="10" max="500" className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-green-500 text-sm font-bold" />
+          </div>
+          <div>
+            <label className="block text-xs font-mono text-yellow-500 mb-1">☣️ Лимит Радиации (RAD)</label>
+            <input type="number" name="maxRadiation" value={params.maxRadiation} onChange={handleChange} min="10" max="500" className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-green-500 text-sm font-bold" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="block text-[10px] font-mono text-lime-400 mb-1 leading-tight">📡 Заряды Гейгера</label>
+            <input type="number" name="geigerCharges" value={params.geigerCharges} onChange={handleChange} min="0" max="50" className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-2 text-white focus:outline-none focus:border-green-500 text-xs font-bold" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-mono text-purple-400 mb-1 leading-tight">🔮 Поиск Арт.</label>
+            <input type="number" name="detectorCharges" value={params.detectorCharges} onChange={handleChange} min="0" max="50" className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-2 text-white focus:outline-none focus:border-green-500 text-xs font-bold" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-mono text-cyan-400 mb-1 leading-tight">🔩 Запас болтов</label>
+            <input type="number" name="boltCharges" value={params.boltCharges} onChange={handleChange} min="0" max="100" className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-2 text-white focus:outline-none focus:border-green-500 text-xs font-bold" />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-mono text-emerald-400 mb-1">🛠️ Начальная модель детектора артефактов</label>
+          <select 
+            name="detectorLevel" 
+            value={params.detectorLevel} 
+            onChange={handleChange}
+            className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-green-500 text-sm"
+          >
+            <option value="1">Уровень 1: Простой (звуковой лог "Рядом есть артефакт!")</option>
+            <option value="2">Уровень 2: Направление (веерный радар-радиальный полукруг)</option>
+            <option value="3">Уровень 3: Секторный (выделяет приблизительную сетку 3x3)</option>
+            <option value="4">У0вень 4: Точный (сканирует и полностью раскрывает ячейку)</option>
+          </select>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
