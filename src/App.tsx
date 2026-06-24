@@ -4,6 +4,7 @@ import { Game } from './components/Game';
 import { Chat, ChatMessage } from './components/Chat';
 import { Tavern } from './components/Tavern';
 import { generateMap, GameMap, GenerationParams } from './utils/generator';
+import { Map as MapIcon, Flame, Wrench } from 'lucide-react';
 
 type GameState = 'setup' | 'playing' | 'ended';
 
@@ -17,7 +18,7 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState>('setup');
   const [map, setMap] = useState<GameMap | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [activeTab, setActiveTab] = useState<'map' | 'bar'>('map');
+  const [activeTab, setActiveTab] = useState<'map' | 'bar' | 'admin'>('map');
   const [stashLoot, setStashLoot] = useState<LootItem[]>([
     { id: '1', name: 'Аптечка', weight: 10 },
     { id: '2', name: 'Патроны', weight: 20 },
@@ -222,6 +223,12 @@ export default function App() {
       setIsProxyingAsPlayer(!isProxyingAsPlayer);
     }
   };
+
+  useEffect(() => {
+    if (!isGM && activeTab === 'admin') {
+      setActiveTab('map');
+    }
+  }, [isGM, activeTab]);
 
   const syncAll = (newGameState: GameState, newMap: GameMap | null, newMessages: ChatMessage[]) => {
     setGameState(newGameState);
@@ -500,19 +507,30 @@ export default function App() {
               <span className="text-emerald-400 uppercase">СВЯЗЬ АКТИВНА</span>
             </div>
 
-            <div className="flex bg-gray-950 p-1 rounded border border-gray-800 text-xs font-mono select-none">
+            <div className="flex bg-gray-950 p-1 rounded border border-gray-800 text-xs font-mono select-none gap-0.5">
               <button
                 onClick={() => setActiveTab('map')}
-                className={`px-3 py-1.5 rounded transition font-bold cursor-pointer ${activeTab === 'map' ? 'bg-emerald-600 text-gray-950' : 'text-gray-400 hover:text-gray-200'}`}
+                className={`px-3 py-1.5 rounded transition font-bold cursor-pointer flex items-center gap-1.5 ${activeTab === 'map' ? 'bg-emerald-600 text-gray-950' : 'text-gray-400 hover:text-gray-200'}`}
               >
-                🗺️ Карта Зоны
+                <MapIcon className="w-3.5 h-3.5" />
+                <span>Карта Зоны</span>
               </button>
               <button
                 onClick={() => setActiveTab('bar')}
-                className={`px-3 py-1.5 rounded transition font-bold cursor-pointer ${activeTab === 'bar' ? 'bg-emerald-600 text-gray-950' : 'text-gray-400 hover:text-gray-200'}`}
+                className={`px-3 py-1.5 rounded transition font-bold cursor-pointer flex items-center gap-1.5 ${activeTab === 'bar' ? 'bg-emerald-600 text-gray-950' : 'text-gray-400 hover:text-gray-200'}`}
               >
-                🍺 Бар «100 Рентген»
+                <Flame className="w-3.5 h-3.5" />
+                <span>Бар «100 Рентген»</span>
               </button>
+              {isGM && (
+                <button
+                  onClick={() => setActiveTab('admin')}
+                  className={`px-3 py-1.5 rounded transition font-bold cursor-pointer flex items-center gap-1.5 ${activeTab === 'admin' ? 'bg-amber-600 text-gray-950' : 'text-gray-400 hover:text-gray-200'}`}
+                >
+                  <Wrench className="w-3.5 h-3.5" />
+                  <span>Панель куратора</span>
+                </button>
+              )}
             </div>
             
             <div className="flex items-center gap-1.5">
@@ -563,13 +581,23 @@ export default function App() {
 
         <main className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6">
           <div className="flex-1 min-h-0 overflow-y-auto">
-            {activeTab === 'bar' ? (
+            {activeTab === 'admin' ? (
               <Tavern
                 ws={socketRef.current}
                 userId={userId}
                 username={username}
                 isGM={isGM}
                 gameMap={map}
+                viewMode="admin"
+              />
+            ) : activeTab === 'bar' ? (
+              <Tavern
+                ws={socketRef.current}
+                userId={userId}
+                username={username}
+                isGM={isGM}
+                gameMap={map}
+                viewMode="user"
               />
             ) : (
               <>
@@ -613,11 +641,26 @@ export default function App() {
                 )}
 
                 {gameState === 'ended' && (
-                  <div className="h-full flex flex-col items-center justify-center bg-gray-900 rounded-lg border border-emerald-900/40 p-8">
-                    <h2 className="text-4xl font-extrabold text-emerald-500 mb-4 tracking-wider">ЭВАКУАЦИЯ УСПЕШНА</h2>
-                    <p className="text-gray-400 mb-8 text-center max-w-sm">
-                      Группа преодолела опасности аномальной зоны и вернулась на базу с добытыми артефактами.
-                    </p>
+                  <div className={`h-full flex flex-col items-center justify-center bg-gray-900 rounded-lg border p-8 ${
+                    map && (map.health <= 0 || map.radiation >= map.maxRadiation)
+                      ? 'border-red-900/40'
+                      : 'border-emerald-900/40'
+                  }`}>
+                    {map && (map.health <= 0 || map.radiation >= map.maxRadiation) ? (
+                      <>
+                        <h2 className="text-4xl font-extrabold text-red-500 mb-4 tracking-wider uppercase">ГРУППА ПОГИБЛА</h2>
+                        <p className="text-gray-400 mb-8 text-center max-w-sm">
+                          Связь с отрядом оборвалась. Все члены группы погибли в аномальной зоне от смертельных повреждений или критического уровня радиации.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <h2 className="text-4xl font-extrabold text-emerald-500 mb-4 tracking-wider uppercase">ЭВАКУАЦИЯ УСПЕШНА</h2>
+                        <p className="text-gray-400 mb-8 text-center max-w-sm">
+                          Группа преодолела опасности аномальной зоны и вернулась на базу с добытыми артефактами.
+                        </p>
+                      </>
+                    )}
                     {isGM && (
                       <button 
                         onClick={resetGame}

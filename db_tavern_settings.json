@@ -1,0 +1,14 @@
+{
+  "tavernName": "Бар «100 Рентген»",
+  "enabledGames": {
+    "trades": true,
+    "pazaak": true,
+    "dice": true,
+    "races": true,
+    "slots": true,
+    "roulette": true,
+    "shooting": true,
+    "thimblerig": true,
+    "svinya": true
+  }
+}

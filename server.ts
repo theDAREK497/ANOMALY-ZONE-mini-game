@@ -525,6 +525,7 @@ function saveShopItems() {
 const TAVERN_SETTINGS_FILE = path.join(process.cwd(), "db_tavern_settings.json");
 interface TavernSettings {
   tavernName: string;
+  merchantName: string;
   enabledGames: {
     trades: boolean;
     pazaak: boolean;
@@ -533,10 +534,13 @@ interface TavernSettings {
     slots: boolean;
     roulette: boolean;
     shooting: boolean;
+    thimblerig: boolean;
+    svinya: boolean;
   };
 }
 let tavernSettings: TavernSettings = {
   tavernName: "Бар «100 Рентген»",
+  merchantName: "Сидорович",
   enabledGames: {
     trades: true,
     pazaak: true,
@@ -544,13 +548,18 @@ let tavernSettings: TavernSettings = {
     races: true,
     slots: true,
     roulette: true,
-    shooting: true
+    shooting: true,
+    thimblerig: true,
+    svinya: true
   }
 };
 
 try {
   if (fs.existsSync(TAVERN_SETTINGS_FILE)) {
     tavernSettings = JSON.parse(fs.readFileSync(TAVERN_SETTINGS_FILE, "utf-8"));
+    if (!tavernSettings.merchantName) {
+      tavernSettings.merchantName = "Сидорович";
+    }
   } else {
     fs.writeFileSync(TAVERN_SETTINGS_FILE, JSON.stringify(tavernSettings, null, 2), "utf-8");
   }
@@ -566,6 +575,21 @@ function saveTavernSettings() {
   }
 }
 
+function formatCredits(amount: number): string {
+  const lastDigit = amount % 10;
+  const lastTwoDigits = amount % 100;
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
+    return `${amount} кредитов`;
+  }
+  if (lastDigit === 1) {
+    return `${amount} кредит`;
+  }
+  if (lastDigit >= 2 && lastDigit <= 4) {
+    return `${amount} кредита`;
+  }
+  return `${amount} кредитов`;
+}
+
 function initPlayerProfile(id: string, username: string) {
   if (!playerDb[id]) {
     playerDb[id] = {
@@ -575,7 +599,7 @@ function initPlayerProfile(id: string, username: string) {
       pazaakDeck: []
     };
     savePlayerDb();
-    appendSystemMessage(`👤 База Данных: Сформирован кошелек в КПК-сети для сталкера "${username}" (+1000 RU).`, "info");
+    appendSystemMessage(`👤 База Данных: Сформирован кошелек в КПК-сети для сталкера "${username}" (+1000 кр.).`, "info");
   } else if (!playerDb[id].userName) {
     playerDb[id].userName = username;
     savePlayerDb();
@@ -589,6 +613,7 @@ function broadcastTavernGames() {
 
 // ПАЗААК ЛОББИ И РУЛЕТКА
 let pazaakLobbies: Record<string, any> = {};
+let activeSvinyaBets: Record<string, number> = {};
 
 // АНОМАЛЬНЫЕ СКАЧКИ ОДДС
 let activeRace: {
@@ -778,7 +803,7 @@ function checkPazaakRoundEnd(lobby: any) {
       lobby.status = "finished";
       lobby.winner = lobby.creatorId;
       lobby.statusMessage = `Победный финал! ${lobby.creatorName} разгромил оппонента ${lobby.roundsWonA}:${lobby.roundsWonB}!`;
-      lobby.log.push(`🏆 ${lobby.creatorName} забирает все! Выигрыш: +${lobby.bet} RU`);
+      lobby.log.push(`🏆 ${lobby.creatorName} забирает все! Выигрыш: +${formatCredits(lobby.bet)}`);
       
       if (playerDb[lobby.creatorId]) {
         playerDb[lobby.creatorId].balance += lobby.bet;
@@ -798,7 +823,7 @@ function checkPazaakRoundEnd(lobby: any) {
       if (lobby.opponentId !== "BOT_BAR" && playerDb[lobby.opponentId]) {
         playerDb[lobby.opponentId].balance += lobby.bet * 2;
       } else if (lobby.opponentId === "BOT_BAR") {
-        lobby.log.push(`💸 Сталкер ${lobby.creatorName} оставляет ставку ${lobby.bet} RU у бармена.`);
+        lobby.log.push(`💸 Сталкер ${lobby.creatorName} оставляет ставку ${formatCredits(lobby.bet)} у бармена.`);
       }
       savePlayerDb();
     } else {
@@ -1045,7 +1070,7 @@ wss.on("connection", (ws) => {
           const profile = playerDb[playerId];
           if (!profile) return;
           if (profile.balance < 300) {
-            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на балансе КПК! Бустер стоит 300 RU.", type: "danger" } }));
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на балансе КПК! Бустер стоит 300 кредитов.", type: "danger" } }));
             return;
           }
           profile.balance -= 300;
@@ -1063,7 +1088,7 @@ wss.on("connection", (ws) => {
             payload: { pulled, profile }
           }));
           
-          appendSystemMessage(`🃏 ${username} приобрел бустер Паазака за 300 RU и вытащил: [${pulled.join(", ")}]!`, "loot");
+          appendSystemMessage(`🃏 ${username} приобрел бустер Паазака за 300 кредитов и вытащил: [${pulled.join(", ")}]!`, "loot");
           broadcastTavernGames();
           break;
         }
@@ -1144,7 +1169,7 @@ wss.on("connection", (ws) => {
             playerBBoard: [],
             roundsWonA: 0,
             roundsWonB: 0,
-            log: [`Начата встреча Паазак между ${creatorName} со ставкой ${bet} RU.`],
+            log: [`Начата встреча Паазак между ${creatorName} со ставкой ${formatCredits(bet)}.`],
             statusMessage: opponentId === "BOT_BAR" ? "Игра началась!" : "Ожидаем оппонента...",
             winner: null
           };
@@ -1155,7 +1180,7 @@ wss.on("connection", (ws) => {
             rollPazaakStep(newLobby);
           }
 
-          appendSystemMessage(`🎲 Сталкер ${creatorName} открыл стол Паазак со ставкой ${bet} RU.`, "info");
+          appendSystemMessage(`🎲 Сталкер ${creatorName} открыл стол Паазак со ставкой ${formatCredits(bet)}.`, "info");
           broadcastTavernGames();
           break;
         }
@@ -1202,7 +1227,7 @@ wss.on("connection", (ws) => {
           lobby.statusMessage = "Оппонент подключился! Сдача первого раунда...";
           lobby.log.push(`${opponentName} зашел во встречу. Ставки пополнены.`);
 
-          appendSystemMessage(`⚔️ Сталкер ${opponentName} принял дуэль в Паазак от ${lobby.creatorName} на ${lobby.bet} RU!`, "warning");
+          appendSystemMessage(`⚔️ Сталкер ${opponentName} принял дуэль в Паазак от ${lobby.creatorName} на ${formatCredits(lobby.bet)}!`, "warning");
           rollPazaakStep(lobby);
           
           broadcastTavernGames();
@@ -1362,7 +1387,7 @@ wss.on("connection", (ws) => {
             }
           }));
 
-          appendSystemMessage(`🎲 Сталкер ${username} бросает кости против бармена на ${bet} RU.`, "info");
+          appendSystemMessage(`🎲 Сталкер ${username} бросает кости против бармена на ${formatCredits(bet)}.`, "info");
           break;
         }
 
@@ -1432,8 +1457,8 @@ wss.on("connection", (ws) => {
             if (result === "win") {
               prize = bet * 2;
               profile.balance += prize;
-              message = `🎉 ВЫ ВЫИГРАЛИ! Ваши [${finalPlayerHand.name}] уделали кости бармена [${finalBotHand.name}]! +${bet} RU!`;
-              appendSystemMessage(`🎉 Сталкер ${username} выиграл +${bet} RU у бармена в Кости со счетом [${finalPlayerHand.name}]!`, "success");
+              message = `🎉 ВЫ ВЫИГРАЛИ! Ваши [${finalPlayerHand.name}] уделали кости бармена [${finalBotHand.name}]! +${formatCredits(bet)}!`;
+              appendSystemMessage(`🎉 Сталкер ${username} выиграл +${formatCredits(bet)} у бармена в Кости со счетом [${finalPlayerHand.name}]!`, "success");
             } else if (result === "lose") {
               prize = 0;
               message = `💸 Увы! Бармен обыграл вас своей рукой [${finalBotHand.name}] против ваших [${finalPlayerHand.name}].`;
@@ -1494,7 +1519,7 @@ wss.on("connection", (ws) => {
           savePlayerDb();
 
           activeRace.bets.push({ playerId, username, contestantName, betAmount });
-          activeRace.log.push(`📝 Ставка: ${username} зарядил ${betAmount} RU на "${contestantName}"`);
+          activeRace.log.push(`📝 Ставка: ${username} зарядил ${formatCredits(betAmount)} на "${contestantName}"`);
 
           broadcastTavernGames();
           break;
@@ -1612,8 +1637,8 @@ wss.on("connection", (ws) => {
                   const winnings = Math.floor(b.betAmount * winner.odds);
                   if (playerDb[b.playerId]) {
                     playerDb[b.playerId].balance += winnings;
-                    activeRace.log.push(`💰 ${b.username} забирает выплату: +${winnings} RU (кэф ${winner.odds}x)!`);
-                    appendSystemMessage(`💰 Сталкер ${b.username} сорвал куш в ${winnings} RU на "${winner.name}"!`, "loot");
+                    activeRace.log.push(`💰 ${b.username} забирает выплату: +${formatCredits(winnings)} (кэф ${winner.odds}x)!`);
+                    appendSystemMessage(`💰 Сталкер ${b.username} сорвал куш в ${formatCredits(winnings)} на "${winner.name}"!`, "loot");
                   }
                 } else {
                   activeRace.log.push(`🥀 ${b.username} проиграл свою ставку на ${b.contestantName}`);
@@ -1646,7 +1671,7 @@ wss.on("connection", (ws) => {
           if (!tavernSettings.enabledGames.trades) {
             const player = clients.get(ws);
             if (!player || player.role !== "gm") {
-              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Торговая скупка Сидоровича временно закрыта куратором!", type: "danger" } }));
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: `❌ Скупка у торговца ${tavernSettings.merchantName || "Сидорович"} временно приостановлена куратором!`, type: "danger" } }));
               return;
             }
           }
@@ -1671,7 +1696,7 @@ wss.on("connection", (ws) => {
 
           map.inventory.splice(itemIndex, 1);
 
-          appendSystemMessage(`🤝 Сталкер ${username} сдал Сидоровичу хабар: "${itemName}" за ${price} RU!`, "loot");
+          appendSystemMessage(`🤝 Сталкер ${username} сдал торговцу ${tavernSettings.merchantName || "Сидорович"} хабар: "${itemName}" за ${formatCredits(price)}!`, "loot");
           
           broadcast("SYNC_APP_STATE", { map, gameState, messages });
           broadcastTavernGames();
@@ -1687,7 +1712,7 @@ wss.on("connection", (ws) => {
           if (profile) {
             profile.balance = Math.max(0, profile.balance + delta);
             savePlayerDb();
-            appendSystemMessage(`⚙️ Система: Баланс игрока был отрегулирован куратором на ${delta > 0 ? '+' : ''}${delta} RU.`, "info");
+            appendSystemMessage(`⚙️ Система: Баланс игрока был отрегулирован куратором на ${delta > 0 ? '+' : ''}${formatCredits(Math.abs(delta))}.`, "info");
             broadcastTavernGames();
           }
           break;
@@ -1702,7 +1727,7 @@ wss.on("connection", (ws) => {
           if (profile) {
             profile.balance = Math.max(0, parseInt(balance, 10) || 0);
             savePlayerDb();
-            appendSystemMessage(`🛡️ База данных: Куратор установил баланс у игрока на ${profile.balance} RU.`, "info");
+            appendSystemMessage(`🛡️ База данных: Куратор установил баланс у игрока в размере ${formatCredits(profile.balance)}.`, "info");
             broadcastTavernGames();
           }
           break;
@@ -1759,7 +1784,7 @@ wss.on("connection", (ws) => {
           };
           shopItems.push(newItem);
           saveShopItems();
-          appendSystemMessage(`🛒 Торговля: Куратор добавил новый товар у Сидоровича: "${name}" за ${price} RU!`, "info");
+          appendSystemMessage(`🛒 Торговля: Куратор добавил новый товар на прилавок ${tavernSettings.merchantName || "Сидорович"}: "${name}" за ${formatCredits(newItem.price)}!`, "info");
           broadcastTavernGames();
           break;
         }
@@ -1773,7 +1798,7 @@ wss.on("connection", (ws) => {
           if (found) {
             shopItems = shopItems.filter(i => i.id !== itemId);
             saveShopItems();
-            appendSystemMessage(`🗑️ Торговля: Куратор убрал товар "${found.name}" с прилавка Сидоровича.`, "info");
+            appendSystemMessage(`🗑️ Торговля: Куратор убрал товар "${found.name}" с прилавка ${tavernSettings.merchantName || "Сидорович"}.`, "info");
             broadcastTavernGames();
           }
           break;
@@ -1783,10 +1808,14 @@ wss.on("connection", (ws) => {
           const player = clients.get(ws);
           if (!player || player.role !== "gm") return;
 
-          const { tavernName, enabledGames } = payload;
+          const { tavernName, merchantName, enabledGames } = payload;
           if (tavernName !== undefined) {
             tavernSettings.tavernName = tavernName;
             appendSystemMessage(`⚙️ Заведение: Бар переименован в "${tavernName}"`, "warning");
+          }
+          if (merchantName !== undefined) {
+            tavernSettings.merchantName = merchantName;
+            appendSystemMessage(`⚙️ Заведение: Торговец переименован в "${merchantName}"`, "warning");
           }
           if (enabledGames !== undefined) {
             tavernSettings.enabledGames = enabledGames;
@@ -1802,7 +1831,7 @@ wss.on("connection", (ws) => {
           if (!tavernSettings.enabledGames.trades) {
             const player = clients.get(ws);
             if (!player || player.role !== "gm") {
-              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Торговая лавка Сидоровича временно закрыта куратором!", type: "danger" } }));
+              ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: `❌ Торговая лавка ${tavernSettings.merchantName || "Сидоровича"} временно закрыта куратором!`, type: "danger" } }));
               return;
             }
           }
@@ -1829,7 +1858,7 @@ wss.on("connection", (ws) => {
           }
           map.inventory.push(item.name);
 
-          appendSystemMessage(`🛒 Сталкер ${username} купил у Сидоровича: "${item.name}" за ${item.price} RU!`, "loot");
+          appendSystemMessage(`🛒 Сталкер ${username} купил у ${tavernSettings.merchantName || "Сидоровича"}: "${item.name}" за ${formatCredits(item.price)}!`, "loot");
           
           broadcast("SYNC_APP_STATE", { map, gameState, messages });
           broadcastTavernGames();
@@ -1868,7 +1897,7 @@ wss.on("connection", (ws) => {
           const activeClient = clients.get(ws);
           const activeUsername = activeClient ? activeClient.username : "Сталкер";
           if (profile.balance < bet) {
-            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно RU на балансе!", type: "danger" } }));
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на балансе КПК!", type: "danger" } }));
             return;
           }
 
@@ -1932,13 +1961,13 @@ wss.on("connection", (ws) => {
               reels,
               winAmount,
               message: winAmount > 0 
-                ? `🎉 ПОБЕДА! Вы выбили [${combinationName}] и выиграли +${winAmount} RU!`
+                ? `🎉 ПОБЕДА! Вы выбили [${combinationName}] и выиграли +${formatCredits(winAmount)}!`
                 : `💸 Увы! Выпало: ${reels.join(" | ")}. Ни единой зацепки. Попробуйте еще раз!`
             }
           }));
 
           if (winAmount >= bet * 5) {
-            appendSystemMessage(`🎰 Слот-Машина: Сталкер ${activeUsername} сорвал куш в размере ${winAmount} RU на автомате («${combinationName}»)!`, "success");
+            appendSystemMessage(`🎰 Слот-Машина: Сталкер ${activeUsername} сорвал куш в размере ${formatCredits(winAmount)} на автомате («${combinationName}»)!`, "success");
           }
 
           broadcastTavernGames();
@@ -2010,13 +2039,13 @@ wss.on("connection", (ws) => {
               winningColor: color,
               winAmount,
               message: winAmount > 0 
-                ? `🎯 ВЫИГРЫШ! Выпало ${colorLabel}. Ваша ставка принесла вам +${winAmount} RU!`
+                ? `🎯 ВЫИГРЫШ! Выпало ${colorLabel}. Ваша ставка принесла вам +${formatCredits(winAmount)}!`
                 : `💸 ПРОИГРЫШ! Выпало ${colorLabel}. Удача ускользнула глубоко под радар.`
             }
           }));
 
           if (winAmount >= betAmount * 5) {
-            appendSystemMessage(`🎡 Рулетка: Сталкер ${activeUsername} поставил на "${betValue}" и поднял +${winAmount} RU на радар-рулетке! Выпало: ${colorLabel}`, "success");
+            appendSystemMessage(`🎡 Рулетка: Сталкер ${activeUsername} поставил на "${betValue}" и поднял +${formatCredits(winAmount)} на радар-рулетке! Выпало: ${colorLabel}`, "success");
           }
 
           broadcastTavernGames();
@@ -2070,13 +2099,129 @@ wss.on("connection", (ws) => {
             payload: {
               winAmount,
               message: winAmount > 0
-                ? `🎖️ РЕЗУЛЬТАТ: Набрано ${score} очков (Звание: ${rank}). Вы получили выплату +${winAmount} RU!`
+                ? `🎖️ РЕЗУЛЬТАТ: Набрано ${score} очков (Звание: ${rank}). Вы получили выплату +${formatCredits(winAmount)}!`
                 : `❌ РЕЗУЛЬТАТ: Набрано ${score} очков. Слишком много промахов (Звание: ${rank}). Ставка ушла бармену.`
             }
           }));
 
           if (winAmount >= bet * 1.5) {
-            appendSystemMessage(`🎯 Тир: Сталкер ${activeUsername} прошел боевую тренировку в Тире с рангом [${rank}] и выиграл +${winAmount} RU!`, "success");
+            appendSystemMessage(`🎯 Тир: Сталкер ${activeUsername} прошел боевую тренировку в Тире с рангом [${rank}] и выиграл +${formatCredits(winAmount)}!`, "success");
+          }
+
+          broadcastTavernGames();
+          break;
+        }
+
+        case "THIMBLERIG_PLAY": {
+          if (!tavernSettings.enabledGames.thimblerig) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Напёрстки временно отключены куратором!", type: "danger" } }));
+            return;
+          }
+          const { playerId, bet, chosenCup } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+          const activeClient = clients.get(ws);
+          const activeUsername = activeClient ? activeClient.username : "Сталкер";
+          if (profile.balance < bet) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на балансе КПК!", type: "danger" } }));
+            return;
+          }
+
+          profile.balance -= bet;
+          const winningCup = Math.floor(Math.random() * 3);
+          const win = chosenCup === winningCup;
+          const winAmount = win ? Math.floor(bet * 2.8) : 0;
+          if (winAmount > 0) {
+            profile.balance += winAmount;
+          }
+          savePlayerDb();
+
+          ws.send(JSON.stringify({
+            type: "THIMBLERIG_RESULT",
+            payload: {
+              winningCup,
+              chosenCup,
+              winAmount,
+              message: winAmount > 0
+                ? `🎉 Кураж! Напёрсточник недоглядел! Шарик под стаканом #${winningCup + 1}. Вы подняли +${formatCredits(winAmount)}!`
+                : `💸 Увы! Пусто! Шарик оказался под стаканом #${winningCup + 1}. Попробуйте ещё раз!`
+            }
+          }));
+
+          if (winAmount >= bet * 2) {
+            appendSystemMessage(`🤹 Напёрстки: Сталкер ${activeUsername} обыграл напёрсточника и унёс +${formatCredits(winAmount)}!`, "success");
+          }
+          broadcastTavernGames();
+          break;
+        }
+
+        case "SVINYA_START": {
+          if (!tavernSettings.enabledGames.svinya) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Карточная игра Свинья временно отключена куратором!", type: "danger" } }));
+            return;
+          }
+          const { playerId, bet } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+          if (profile.balance < bet) {
+            ws.send(JSON.stringify({ type: "NOTIFICATION", payload: { text: "❌ Недостаточно средств на балансе КПК!", type: "danger" } }));
+            return;
+          }
+
+          profile.balance -= bet;
+          activeSvinyaBets[playerId] = bet;
+          savePlayerDb();
+
+          ws.send(JSON.stringify({
+            type: "SVINYA_START_RESPONSE",
+            payload: {
+              success: true,
+              balance: profile.balance
+            }
+          }));
+          broadcastTavernGames();
+          break;
+        }
+
+        case "SVINYA_FINISH": {
+          const { playerId, result } = payload;
+          const profile = playerDb[playerId];
+          if (!profile) return;
+          const activeClient = clients.get(ws);
+          const activeUsername = activeClient ? activeClient.username : "Сталкер";
+          const bet = activeSvinyaBets[playerId] || 100;
+
+          let winAmount = 0;
+          if (result === "win") {
+            winAmount = bet * 2;
+          } else if (result === "tie") {
+            winAmount = bet;
+          }
+
+          if (winAmount > 0) {
+            profile.balance += winAmount;
+          }
+          delete activeSvinyaBets[playerId];
+          savePlayerDb();
+
+          ws.send(JSON.stringify({
+            type: "SVINYA_FINISH_RESPONSE",
+            payload: {
+              winAmount,
+              result,
+              balance: profile.balance,
+              message: result === "win"
+                ? `🏆 Вы обыграли в «Свинью» и забрали +${formatCredits(winAmount)}!`
+                : result === "tie"
+                ? `🤝 Ничья в «Свинью»! Возвращено ${formatCredits(winAmount)}.`
+                : `💸 Вы закончили партию в «Свинью» проигрышем. Ставка ушла бармену.`
+            }
+          }));
+
+          if (result === "win") {
+            appendSystemMessage(`🐷 Свинья: Сталкер ${activeUsername} разложил карты кругом, обыграл Харона и заработал +${formatCredits(winAmount)}!`, "success");
+          } else if (result === "lose") {
+            appendSystemMessage(`🐷 Свинья: Сталкер ${activeUsername} остался «Свиньёй» в карточной партии и потерял свои ${formatCredits(bet)}.`, "info");
           }
 
           broadcastTavernGames();

@@ -1,4 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
+import {
+  CustomGamepad, CustomWarning, CustomRun, CustomCrown,
+  CustomNote, CustomTarget, CustomGun, CustomShield,
+  CustomBiohazard, CustomBug, CustomGhost, CustomRat, CustomDice,
+  CustomJoker, CustomPig, CustomHeart, CustomDiamond, CustomClub, CustomSpade,
+  CustomTrophy, CustomHandshake
+} from "./CustomIcons";
 import { 
   Coins, 
   ShoppingBag, 
@@ -20,9 +27,64 @@ import {
   Minus,
   Trash2,
   Wrench,
-  Crosshair
+  Crosshair,
+  HelpCircle,
+  Beer,
+  Settings,
+  Cylinder,
+  Wine,
+  Gem,
+  Skull,
+  AlertTriangle,
+  Circle,
+  Bug,
+  FlaskConical,
+  PiggyBank,
+  Target,
+  Shield,
+  Store,
+  Briefcase,
+  Package,
+  Dices,
+  Gamepad2,
+  VenetianMask,
+  Clock,
+  Users,
+  Handshake,
+  Crown,
+  Flag,
+  Lightbulb,
+  Radio,
+  Award,
+  Trophy,
+  PartyPopper,
+  Swords,
+  Smile,
+  Bot,
+  Database,
+  Building,
+  Compass,
+  Bomb,
+  LogOut,
+  Activity
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { LANG } from "../locales/lang";
+
+const formatCredits = (amount: number): string => {
+  const absVal = Math.abs(amount);
+  const mod10 = absVal % 10;
+  const mod100 = absVal % 100;
+  let word = "кредитов";
+  if (mod100 < 11 || mod100 > 19) {
+    if (mod10 === 1) {
+      word = "кредит";
+    } else if (mod10 >= 2 && mod10 <= 4) {
+      word = "кредита";
+    }
+  }
+  return `${amount} ${word}`;
+};
 
 interface TavernProps {
   ws: WebSocket | null;
@@ -31,6 +93,7 @@ interface TavernProps {
   isGM: boolean;
   gameMap: any;
   onAddMessage?: (message: any) => void;
+  viewMode?: "user" | "admin";
 }
 
 export const Tavern: React.FC<TavernProps> = ({
@@ -39,7 +102,8 @@ export const Tavern: React.FC<TavernProps> = ({
   username,
   isGM,
   gameMap,
-  onAddMessage
+  onAddMessage,
+  viewMode = "user"
 }) => {
   // Sync states
   const [playerDb, setPlayerDb] = useState<Record<string, any>>({});
@@ -54,22 +118,35 @@ export const Tavern: React.FC<TavernProps> = ({
   const [shopItems, setShopItems] = useState<any[]>([]);
   const [tavernSettings, setTavernSettings] = useState<{
     tavernName: string;
+    merchantName: string;
     enabledGames: {
       trades: boolean;
       pazaak: boolean;
       dice: boolean;
       races: boolean;
+      slots: boolean;
+      roulette: boolean;
+      shooting: boolean;
+      thimblerig: boolean;
+      svinya: boolean;
     };
   }>({
     tavernName: "Бар «100 Рентген»",
+    merchantName: "Сидорович",
     enabledGames: {
       trades: true,
       pazaak: true,
       dice: true,
-      races: true
+      races: true,
+      slots: true,
+      roulette: true,
+      shooting: true,
+      thimblerig: true,
+      svinya: true
     }
   });
   const [gmTavernNameInput, setGmTavernNameInput] = useState<string | undefined>(undefined);
+  const [gmMerchantNameInput, setGmMerchantNameInput] = useState<string | undefined>(undefined);
 
   // GM shop inputs
   const [gmItemName, setGmItemName] = useState("");
@@ -104,8 +181,8 @@ export const Tavern: React.FC<TavernProps> = ({
   });
 
   // Subsections inside Tavern (Bar)
-  // 'trades' | 'pazaak' | 'dice' | 'races' | 'slots' | 'roulette' | 'shooting'
-  const [activeSubTab, setActiveSubTab] = useState<"trades" | "pazaak" | "dice" | "races" | "slots" | "roulette" | "shooting">("trades");
+  // 'trades' | 'pazaak' | 'dice' | 'races' | 'slots' | 'roulette' | 'shooting' | 'thimblerig' | 'svinya'
+  const [activeSubTab, setActiveSubTab] = useState<"trades" | "pazaak" | "dice" | "races" | "slots" | "roulette" | "shooting" | "thimblerig" | "svinya">("trades");
 
   // Pazaak local interactions
   const [selectedDeckCards, setSelectedDeckCards] = useState<string[]>([]);
@@ -188,7 +265,62 @@ export const Tavern: React.FC<TavernProps> = ({
     weapon: "pm",
     targets: [],
     bulletHoles: [],
-    flashes: []
+    flashes: [],
+    bet: 100
+  });
+
+  // Thimblerig States
+  const [thimblerigState, setThimblerigState] = useState<{
+    bet: number;
+    active: boolean;
+    shuffling: boolean;
+    ballCup: number | null;
+    selectedCup: number | null;
+    revealed: boolean;
+    winAmount?: number;
+    message?: string;
+    initialReveal?: boolean;
+    positions: number[];
+  }>({
+    bet: 100,
+    active: false,
+    shuffling: false,
+    ballCup: null,
+    selectedCup: null,
+    revealed: false,
+    initialReveal: false,
+    positions: [0, 1, 2]
+  });
+
+  // Card Game Svinya Settings & States
+  interface SvinyaCard {
+    suit: "hearts" | "diamonds" | "clubs" | "spades";
+    value: string;
+    isPig: boolean;
+  }
+
+  const [svinyaState, setSvinyaState] = useState<{
+    active: boolean;
+    bet: number;
+    circleCards: (SvinyaCard | null)[];
+    centerPile: SvinyaCard[];
+    playerSty: SvinyaCard[];
+    botSty: SvinyaCard[];
+    turn: "player" | "bot";
+    phase: "ready" | "playing" | "ended";
+    result?: "win" | "lose" | "tie";
+    message?: string;
+    loading: boolean;
+  }>({
+    active: false,
+    bet: 100,
+    circleCards: [],
+    centerPile: [],
+    playerSty: [],
+    botSty: [],
+    turn: "player",
+    phase: "ready",
+    loading: false
   });
 
   // Listen back server replies
@@ -240,6 +372,68 @@ export const Tavern: React.FC<TavernProps> = ({
             winAmount: data.payload.winAmount,
             message: data.payload.message
           }));
+        } else if (data.type === "THIMBLERIG_RESULT") {
+          const res = data.payload;
+          setThimblerigState(prev => ({
+            ...prev,
+            shuffling: false,
+            ballCup: res.winningCup,
+            revealed: true,
+            winAmount: res.winAmount,
+            message: res.message
+          }));
+          if (res.winAmount > 0) {
+            playWinSfx();
+          }
+        } else if (data.type === "SVINYA_START_RESPONSE") {
+          if (data.payload.success) {
+            const suits: ("hearts" | "diamonds" | "clubs" | "spades")[] = ["hearts", "diamonds", "clubs", "spades"];
+            const values = ["6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+            const deck: SvinyaCard[] = [];
+            suits.forEach(suit => {
+              values.forEach(value => {
+                const isPig = suit === "spades" && value === "6";
+                deck.push({ suit, value, isPig });
+              });
+            });
+
+            // Shuffle deck
+            for (let i = deck.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              const temp = deck[i];
+              deck[i] = deck[j];
+              deck[j] = temp;
+            }
+
+            const centerCard = deck.pop()!;
+
+            setSvinyaState(prev => ({
+              ...prev,
+              circleCards: deck,
+              centerPile: [centerCard],
+              playerSty: [],
+              botSty: [],
+              turn: "player",
+              phase: "playing",
+              result: undefined,
+              message: undefined,
+              loading: false
+            }));
+          } else {
+            setSvinyaState(prev => ({ ...prev, loading: false }));
+          }
+        } else if (data.type === "SVINYA_FINISH_RESPONSE") {
+          const res = data.payload;
+          setSvinyaState(prev => ({
+            ...prev,
+            phase: "ended",
+            result: res.result,
+            message: res.message,
+            loading: false
+          }));
+          if (res.winAmount > 0) {
+            playWinSfx();
+          }
         } else if (data.type === "NOTIFICATION") {
           setPdaAlert({
             text: data.payload.text,
@@ -291,7 +485,7 @@ export const Tavern: React.FC<TavernProps> = ({
   // Buy Booster
   const handleBuyBooster = () => {
     if (playerProfile.balance < 300) {
-      setPdaAlert({ text: "❌ Недостаточно средств на балансе КПК! 300 RU нужно.", type: "danger" });
+      setPdaAlert({ text: "❌ Недостаточно средств на балансе КПК! Нужно 300 кредитов.", type: "danger" });
       setTimeout(() => setPdaAlert(null), 3000);
       return;
     }
@@ -342,13 +536,13 @@ export const Tavern: React.FC<TavernProps> = ({
   // Pazaak game creators
   const handleCreatePazaakMatch = () => {
     if (!playerProfile.pazaakDeck || playerProfile.pazaakDeck.length < 8) {
-      setPdaAlert({ text: "⚠️ Сначала соберите и сохраните колоду из 8 карт в секции «Настройка Колоды»!", type: "danger" });
+      setPdaAlert({ text: "<CustomWarning />️ Сначала соберите и сохраните колоду из 8 карт в секции «Настройка Колоды»!", type: "danger" });
       setTimeout(() => setPdaAlert(null), 4000);
       return;
     }
 
     if (playerProfile.balance < pazaakBetAmount) {
-      setPdaAlert({ text: "Недостаточно RU на балансе!", type: "danger" });
+      setPdaAlert({ text: "Недостаточно кредитов на балансе!", type: "danger" });
       setTimeout(() => setPdaAlert(null), 2500);
       return;
     }
@@ -368,7 +562,7 @@ export const Tavern: React.FC<TavernProps> = ({
 
   const handleJoinPazaakMatch = (lobbyId: string) => {
     if (!playerProfile.pazaakDeck || playerProfile.pazaakDeck.length < 8) {
-      setPdaAlert({ text: "⚠️ Сначала соберите и сохраните колоду из 8 карт в секции «Настройка Колоды»!", type: "danger" });
+      setPdaAlert({ text: "<CustomWarning />️ Сначала соберите и сохраните колоду из 8 карт в секции «Настройка Колоды»!", type: "danger" });
       setTimeout(() => setPdaAlert(null), 4000);
       return;
     }
@@ -376,7 +570,7 @@ export const Tavern: React.FC<TavernProps> = ({
     const lobby = pazaakLobbies[lobbyId];
     // Self-combat allowed by user request
     if (playerProfile.balance < lobby.bet) {
-      setPdaAlert({ text: "Недостаточно RU на балансе!", type: "danger" });
+      setPdaAlert({ text: "Недостаточно кредитов на балансе!", type: "danger" });
       setTimeout(() => setPdaAlert(null), 2500);
       return;
     }
@@ -439,7 +633,7 @@ export const Tavern: React.FC<TavernProps> = ({
   // Play Dice Match
   const handlePlayDice = () => {
     if (playerProfile.balance < diceBetInput) {
-      setPdaAlert({ text: "Недостаточно RU для ставки!", type: "danger" });
+      setPdaAlert({ text: "Недостаточно кредитов для ставки!", type: "danger" });
       setTimeout(() => setPdaAlert(null), 2500);
       return;
     }
@@ -489,7 +683,7 @@ export const Tavern: React.FC<TavernProps> = ({
       return;
     }
     if (playerProfile.balance < raceBetAmount) {
-      setPdaAlert({ text: "Недостаточно RU!", type: "danger" });
+      setPdaAlert({ text: "Недостаточно кредитов на балансе!", type: "danger" });
       setTimeout(() => setPdaAlert(null), 2500);
       return;
     }
@@ -722,7 +916,7 @@ export const Tavern: React.FC<TavernProps> = ({
           setSlotsState(prev => ({
             ...prev,
             spinning: false,
-            message: "⚠️ Сервер не ответил вовремя. Баланс обновится автоматически."
+            message: "<CustomWarning />️ Сервер не ответил вовремя. Баланс обновится автоматически."
           }));
         }
       }
@@ -809,7 +1003,7 @@ export const Tavern: React.FC<TavernProps> = ({
         setRouletteState(prev => ({
           ...prev,
           spinning: false,
-          message: "⚠️ Таймаут ответа сервера рулетки."
+          message: "<CustomWarning />️ Таймаут ответа сервера рулетки."
         }));
       }
     }, 4500);
@@ -840,11 +1034,11 @@ export const Tavern: React.FC<TavernProps> = ({
     ];
     
     const targetMeta = {
-      bullseye: { label: "🔴 Мишень", reward: 10, size: 40, lifespan: 1800 },
-      snork: { label: "🧟 Снорк", reward: 25, size: 45, lifespan: 1300 },
-      bloodsucker: { label: "👾 Кровосос", reward: 40, size: 48, lifespan: 1000 },
-      rat: { label: "🐀 Тушканчик", reward: 15, size: 32, lifespan: 1500 },
-      loner: { label: "🧑‍🔬 Санитар (НЕ СТРЕЛЯТЬ!)", reward: -50, size: 42, lifespan: 2500 }
+      bullseye: { label: "Мишень", reward: 10, size: 40, lifespan: 1800 },
+      snork: { label: "Снорк", reward: 25, size: 45, lifespan: 1300 },
+      bloodsucker: { label: "Кровосос", reward: 40, size: 48, lifespan: 1000 },
+      rat: { label: "Тушканчик", reward: 15, size: 32, lifespan: 1500 },
+      loner: { label: "Санитар (НЕ СТРЕЛЯТЬ!)", reward: -50, size: 42, lifespan: 2500 }
     };
 
     const targetLoop = setInterval(() => {
@@ -963,7 +1157,9 @@ export const Tavern: React.FC<TavernProps> = ({
   };
 
   const handleStartShootingGame = (wep: "pm" | "ak" | "vintorez", betAmount: number) => {
-    if (playerProfile.balance < betAmount) {
+    const finalBet = betAmount && betAmount >= 100 ? betAmount : 100;
+    
+    if (playerProfile.balance < finalBet) {
       setPdaAlert({ text: "❌ Недостаточно средств на балансе КПК!", type: "danger" });
       setTimeout(() => setPdaAlert(null), 2500);
       return;
@@ -988,17 +1184,957 @@ export const Tavern: React.FC<TavernProps> = ({
       targets: [],
       bulletHoles: [],
       flashes: [],
-      bet: betAmount
+      bet: finalBet
     });
   };
+
+  // ==========================================
+  // THIMBLERIG HELPER IMPLEMENTATION
+  // ==========================================
+  const handleStartThimblerig = (betAmount: number) => {
+    if (playerProfile.balance < betAmount) {
+      setPdaAlert({ text: "❌ Недостаточно средств на балансе КПК!", type: "danger" });
+      setTimeout(() => setPdaAlert(null), 2500);
+      return;
+    }
+
+    const initialBoltCup = Math.floor(Math.random() * 3);
+
+    // Step 1: Initial Reveal (Show where the bolt is)
+    setThimblerigState({
+      bet: betAmount,
+      active: true,
+      shuffling: false,
+      ballCup: initialBoltCup,
+      selectedCup: null,
+      revealed: false,
+      initialReveal: true,
+      message: LANG.thimblerig.remember,
+      positions: [0, 1, 2]
+    });
+
+    // Step 2: Transition from Reveal to Shuffling after 1300ms
+    setTimeout(() => {
+      // Dynamic swap interval (ms) - higher bet means much faster swaps!
+      const swapSpeed = Math.max(80, 310 - Math.min(230, Math.floor((betAmount / 1000) * 210)));
+      
+      // Total swaps to perform (proportional to maintain about 2-3 seconds of total shuffling time)
+      const totalSwaps = Math.max(8, Math.min(18, Math.floor(2200 / swapSpeed)));
+
+      setThimblerigState(prev => ({
+        ...prev,
+        initialReveal: false,
+        shuffling: true,
+        message: LANG.thimblerig.shuffling,
+        positions: [0, 1, 2]
+      }));
+
+      // Beautiful shuffling swaps
+      let swapTicks = 0;
+      const swapInterval = setInterval(() => {
+        setThimblerigState(prev => {
+          if (!prev.shuffling) {
+            clearInterval(swapInterval);
+            return prev;
+          }
+          const nextPositions = [...prev.positions];
+          const idxA = Math.floor(Math.random() * 3);
+          let idxB = Math.floor(Math.random() * 3);
+          while (idxA === idxB) {
+            idxB = Math.floor(Math.random() * 3);
+          }
+          const temp = nextPositions[idxA];
+          nextPositions[idxA] = nextPositions[idxB];
+          nextPositions[idxB] = temp;
+          return {
+            ...prev,
+            positions: nextPositions
+          };
+        });
+        swapTicks++;
+        if (swapTicks >= totalSwaps) {
+          clearInterval(swapInterval);
+        }
+      }, swapSpeed);
+
+      // Shuffling sound tick simulation matching the swap speed
+      let ticks = 0;
+      const playTick = () => {
+        if (ticks < totalSwaps) {
+          playSlotTick();
+          ticks++;
+          setTimeout(playTick, swapSpeed);
+        }
+      };
+      playTick();
+
+      // Shuffling finishes precisely after the total run time of the swaps
+      setTimeout(() => {
+        setThimblerigState(prev => ({
+          ...prev,
+          shuffling: false,
+          message: LANG.thimblerig.chooseCup
+        }));
+      }, totalSwaps * swapSpeed + 150);
+
+    }, 1300);
+  };
+
+  const handleChooseCup = (cupIndex: number) => {
+    if (thimblerigState.shuffling || thimblerigState.selectedCup !== null || thimblerigState.revealed) return;
+
+    if (ws) {
+      ws.send(JSON.stringify({
+        type: "THIMBLERIG_PLAY",
+        payload: {
+          playerId: userId,
+          bet: thimblerigState.bet,
+          chosenCup: cupIndex
+        }
+      }));
+
+      setThimblerigState(prev => ({
+        ...prev,
+        selectedCup: cupIndex,
+        message: "Куратор проверяет..."
+      }));
+    }
+  };
+
+  // ==========================================
+  // SVINYA GAME HELPER IMPLEMENTATION
+  // ==========================================
+  const SVINYA_RANKS = ["6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+
+  const checkSvinyaPlayable = (card: SvinyaCard, centerCard: SvinyaCard) => {
+    if (card.suit === centerCard.suit) return true;
+    const idx1 = SVINYA_RANKS.indexOf(card.value);
+    const idx2 = SVINYA_RANKS.indexOf(centerCard.value);
+    return Math.abs(idx1 - idx2) === 1;
+  };
+
+  const handleStartSvinya = (betAmount: number) => {
+    if (playerProfile.balance < betAmount) {
+      setPdaAlert({ text: "❌ Недостаточно средств на балансе КПК!", type: "danger" });
+      setTimeout(() => setPdaAlert(null), 2500);
+      return;
+    }
+
+    setSvinyaState(prev => ({
+      ...prev,
+      loading: true,
+      bet: betAmount,
+      active: true,
+      phase: "ready"
+    }));
+
+    if (ws) {
+      ws.send(JSON.stringify({
+        type: "SVINYA_START",
+        payload: {
+          playerId: userId,
+          bet: betAmount
+        }
+      }));
+    }
+  };
+
+  const handleSvinyaPlayerDraw = (circleIndex: number) => {
+    if (svinyaState.phase !== "playing" || svinyaState.turn !== "player") return;
+    const card = svinyaState.circleCards[circleIndex];
+    if (!card) return;
+
+    const nextCircle = [...svinyaState.circleCards];
+    nextCircle[circleIndex] = null;
+
+    const centerCard = svinyaState.centerPile[svinyaState.centerPile.length - 1];
+
+    if (card.isPig) {
+      const updatedPlayerSty = [...svinyaState.playerSty, ...svinyaState.centerPile, card];
+      
+      const remaining = nextCircle.filter(c => c !== null) as SvinyaCard[];
+      let nextCenterCard: SvinyaCard;
+      if (remaining.length > 0) {
+        const randIdx = nextCircle.findIndex(c => c !== null);
+        nextCenterCard = nextCircle[randIdx]!;
+        nextCircle[randIdx] = null;
+      } else {
+        nextCenterCard = { suit: "clubs", value: "Q", isPig: false };
+      }
+
+      setSvinyaState(prev => ({
+        ...prev,
+        circleCards: nextCircle,
+        centerPile: [nextCenterCard],
+        playerSty: updatedPlayerSty,
+        turn: "bot",
+        message: "Хрю-хрю! Визг дикой свиньи! Вы вытащили карту Свиньи и забрали ВСЕ карты из центра!"
+      }));
+
+      playRadarSweep();
+      return;
+    }
+
+    if (checkSvinyaPlayable(card, centerCard)) {
+      const nextCenterPile = [...svinyaState.centerPile, card];
+      setSvinyaState(prev => ({
+        ...prev,
+        circleCards: nextCircle,
+        centerPile: nextCenterPile,
+        message: `Совпадение! Вы сбросили в центр карту. Ход продолжается!`
+      }));
+      playSlotTick();
+    } else {
+      const nextPlayerSty = [...svinyaState.playerSty, card];
+      setSvinyaState(prev => ({
+        ...prev,
+        circleCards: nextCircle,
+        playerSty: nextPlayerSty,
+        turn: "bot",
+        message: "Карта не подошла! Добавлена в ваш загон. Ход переходит к бармену."
+      }));
+      playSlotTick();
+    }
+  };
+
+  const handleSvinyaPlayStyBack = () => {
+    if (svinyaState.phase !== "playing" || svinyaState.turn !== "player") return;
+    if (svinyaState.playerSty.length === 0) return;
+
+    const topCard = svinyaState.playerSty[svinyaState.playerSty.length - 1];
+    const centerCard = svinyaState.centerPile[svinyaState.centerPile.length - 1];
+
+    if (checkSvinyaPlayable(topCard, centerCard)) {
+      const nextPlayerSty = svinyaState.playerSty.slice(0, -1);
+      const nextCenterPile = [...svinyaState.centerPile, topCard];
+      setSvinyaState(prev => ({
+        ...prev,
+        playerSty: nextPlayerSty,
+        centerPile: nextCenterPile,
+        message: `Вы сбросили верхнюю карту своего загона (${topCard.value}) в общую кучу!`
+      }));
+      playSlotTick();
+    }
+  };
+
+  const handleSvinyaFinish = () => {
+    if (svinyaState.phase !== "playing") return;
+
+    let result: "win" | "lose" | "tie" = "tie";
+    const pCount = svinyaState.playerSty.length;
+    const bCount = svinyaState.botSty.length;
+
+    if (pCount < bCount) {
+      result = "win";
+    } else if (pCount > bCount) {
+      result = "lose";
+    } else {
+      result = "tie";
+    }
+
+    if (ws) {
+      ws.send(JSON.stringify({
+        type: "SVINYA_FINISH",
+        payload: {
+          playerId: userId,
+          result
+        }
+      }));
+    }
+  };
+
+  // Svinya CPU Bot Turn logic Effect
+  useEffect(() => {
+    if (svinyaState.phase !== "playing" || svinyaState.turn !== "bot") return;
+
+    const remainingCircleCount = svinyaState.circleCards.filter(c => c !== null).length;
+    if (remainingCircleCount === 0) {
+      handleSvinyaFinish();
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const centerCard = svinyaState.centerPile[svinyaState.centerPile.length - 1];
+
+      // 1. Can Bot play top card from botSty?
+      if (svinyaState.botSty.length > 0) {
+        const topStyCard = svinyaState.botSty[svinyaState.botSty.length - 1];
+        if (checkSvinyaPlayable(topStyCard, centerCard)) {
+          const nextBotSty = svinyaState.botSty.slice(0, -1);
+          const nextCenterPile = [...svinyaState.centerPile, topStyCard];
+          setSvinyaState(prev => ({
+            ...prev,
+            botSty: nextBotSty,
+            centerPile: nextCenterPile,
+            message: `Бармен сыграл карту (${topStyCard.value}) из своего загона!`
+          }));
+          return;
+        }
+      }
+
+      // 2. Otherwise draw from circular deck
+      const remainingIndexes = svinyaState.circleCards
+        .map((c, i) => (c !== null ? i : -1))
+        .filter(i => i !== -1);
+      
+      if (remainingIndexes.length === 0) {
+        handleSvinyaFinish();
+        return;
+      }
+
+      const randIdx = remainingIndexes[Math.floor(Math.random() * remainingIndexes.length)];
+      const drawnCard = svinyaState.circleCards[randIdx]!;
+
+      const nextCircle = [...svinyaState.circleCards];
+      nextCircle[randIdx] = null;
+
+      if (drawnCard.isPig) {
+        const nextBotSty = [...svinyaState.botSty, ...svinyaState.centerPile, drawnCard];
+
+        let nextCenterCard: SvinyaCard;
+        const freshRemaining = nextCircle.filter(c => c !== null) as SvinyaCard[];
+        if (freshRemaining.length > 0) {
+          const firstValid = nextCircle.findIndex(c => c !== null);
+          nextCenterCard = nextCircle[firstValid]!;
+          nextCircle[firstValid] = null;
+        } else {
+          nextCenterCard = { suit: "clubs", value: "Q", isPig: false };
+        }
+
+        setSvinyaState(prev => ({
+          ...prev,
+          circleCards: nextCircle,
+          centerPile: [nextCenterCard],
+          botSty: nextBotSty,
+          turn: "player",
+          message: "Хрю-хрю! Бармен вытащил дикую свинью и забрал кон в свой загон!"
+        }));
+        playRadarSweep();
+        return;
+      }
+
+      if (checkSvinyaPlayable(drawnCard, centerCard)) {
+        const nextCenterPile = [...svinyaState.centerPile, drawnCard];
+        setSvinyaState(prev => ({
+          ...prev,
+          circleCards: nextCircle,
+          centerPile: nextCenterPile,
+          message: `Бармен вытащил подходящую карту (${drawnCard.value}) и сбросил в кучу. Ход бармена продолжается!`
+        }));
+        playSlotTick();
+      } else {
+        const nextBotSty = [...svinyaState.botSty, drawnCard];
+        setSvinyaState(prev => ({
+          ...prev,
+          circleCards: nextCircle,
+          botSty: nextBotSty,
+          turn: "player",
+          message: `Бармен вытащил неподходящую карту и положил её в загон. Твой ход!`
+        }));
+        playSlotTick();
+      }
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [svinyaState.turn, svinyaState.phase, svinyaState.botSty, svinyaState.centerPile, svinyaState.circleCards]);
 
   // Find lobby user is actively playing
   const userActiveLobby: any = (Object.values(pazaakLobbies) as any[]).find(
     (l: any) => l.status === "playing" && (l.creatorId === userId || l.opponentId === userId)
   );
 
+  const renderCuratorPane = () => {
+    return (
+      <div className="space-y-6">
+        {/* Tavern name edit & Game toggles */}
+        <div className="bg-gray-950 p-5 rounded border border-gray-850 space-y-5">
+          <div className="text-amber-500 font-bold font-mono text-xs uppercase pb-1.5 border-b border-gray-800 flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Settings className="w-4 h-4" /> 
+              <span>ПАРАМЕТРЫ ЛОКАЦИИ & ДОСТУПНОСТЬ МИНИ-ИГР ЗОНЫ</span>
+            </div>
+            <span className="text-[9px] text-gray-550 border border-gray-800 px-2 py-0.5 rounded font-bold">GM CONTROL PANEL</span>
+          </div>
+          
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-xs font-mono">
+            {/* Left Column: Tavern & Merchant customizer */}
+            <div className="space-y-4 border-r border-gray-905 lg:pr-6">
+              
+              {/* Tavern name input */}
+              <div className="space-y-1.5">
+                <label className="block text-gray-400 font-bold uppercase text-[10px] tracking-wider"><Store className='w-3.5 h-3.5 inline mr-1 text-amber-500' /> НАЗВАНИЕ БАРА/ТАВЕРНЫ:</label>
+                <input
+                  type="text"
+                  value={gmTavernNameInput !== undefined ? gmTavernNameInput : tavernSettings.tavernName}
+                  onChange={(e) => setGmTavernNameInput(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded p-2 text-xs font-bold font-mono text-gray-200 outline-none focus:border-amber-900 focus:ring-1 focus:ring-amber-900/30"
+                  placeholder="Наберите название бара..."
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      const name = gmTavernNameInput !== undefined ? gmTavernNameInput : tavernSettings.tavernName;
+                      if (ws) {
+                        ws.send(JSON.stringify({
+                          type: "GM_UPDATE_TAVERN_SETTINGS",
+                          payload: { tavernName: name }
+                        }));
+                        setPdaAlert({ text: "Название локации успешно узаконено!", type: "success" });
+                        setTimeout(() => setPdaAlert(null), 2500);
+                      }
+                    }}
+                    className="flex-1 bg-amber-600 hover:bg-amber-500 text-gray-950 font-bold py-1.5 px-2 rounded uppercase text-[10px] cursor-pointer transition-all active:scale-95 text-center"
+                  >
+                    Применить
+                  </button>
+                  <button
+                    onClick={() => {
+                      const T_NAMES = [
+                        "Бар «100 Рентген»",
+                        "Приют Сталкера",
+                        "Кабак «Шестерёнка»",
+                        "База куратора «Холодный Болт»",
+                        "Гремучий Кисель",
+                        "Аномальный Погреб",
+                        "Пьяный Контроллёр",
+                        "Зелёный Дракон",
+                        "У Борова",
+                        "Мёртвый Головастик",
+                        "Кордонский подвал",
+                        "Пересыльный Пункт Группировок",
+                        "Форпост Долга",
+                        "Станция Янов",
+                        "Бар «Штиль»"
+                      ];
+                      const currentVal = gmTavernNameInput !== undefined ? gmTavernNameInput : tavernSettings.tavernName;
+                      const filtered = T_NAMES.filter(n => n !== currentVal);
+                      const randomName = filtered[Math.floor(Math.random() * filtered.length)] || T_NAMES[0];
+                      setGmTavernNameInput(randomName);
+                      if (ws) {
+                        ws.send(JSON.stringify({
+                          type: "GM_UPDATE_TAVERN_SETTINGS",
+                          payload: { tavernName: randomName }
+                        }));
+                        setPdaAlert({ text: `Сгенерировано: ${randomName}`, type: "info" });
+                        setTimeout(() => setPdaAlert(null), 2500);
+                      }
+                    }}
+                    className="bg-gray-800 hover:bg-gray-750 text-gray-300 font-bold py-1.5 px-3 rounded uppercase text-[10px] cursor-pointer transition-all border border-gray-700 hover:border-gray-600"
+                  >
+                    <Dices className='w-3.5 h-3.5 inline mr-1 text-sky-400' /> Случайно
+                  </button>
+                </div>
+              </div>
+
+              {/* Merchant name input */}
+              <div className="space-y-1.5">
+                <label className="block text-gray-400 font-bold uppercase text-[10px] tracking-wider"><User className='w-3.5 h-3.5 inline mr-1 text-amber-500' /> ИМЯ СКУПЩИКА-ТОРГОВЦА:</label>
+                <input
+                  type="text"
+                  value={gmMerchantNameInput !== undefined ? gmMerchantNameInput : tavernSettings.merchantName}
+                  onChange={(e) => setGmMerchantNameInput(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded p-2 text-xs font-bold font-mono text-gray-200 outline-none focus:border-amber-900 focus:ring-1 focus:ring-amber-900/30"
+                  placeholder="Пример: Сидорович, Сыч, Боров..."
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      const name = gmMerchantNameInput !== undefined ? gmMerchantNameInput : tavernSettings.merchantName;
+                      if (ws) {
+                        ws.send(JSON.stringify({
+                          type: "GM_UPDATE_TAVERN_SETTINGS",
+                          payload: { merchantName: name }
+                        }));
+                        setPdaAlert({ text: `Скупщик переименован в "${name}"!`, type: "success" });
+                        setTimeout(() => setPdaAlert(null), 2500);
+                      }
+                    }}
+                    className="flex-1 bg-amber-600 hover:bg-amber-500 text-gray-950 font-bold py-1.5 px-2 rounded uppercase text-[10px] cursor-pointer transition-all active:scale-95 text-center"
+                  >
+                    Применить
+                  </button>
+                  <button
+                    onClick={() => {
+                      const M_NAMES = [
+                        "Сидорович",
+                        "Сыч",
+                        "Бармен",
+                        "Боров",
+                        "Зулус",
+                        "Гавайец",
+                        "Сахаров",
+                        "Ашот",
+                        "Каланча",
+                        "Торговец Митяй",
+                        "Дядько Яр",
+                        "Косой",
+                        "Шустрый",
+                        "Суслов",
+                        "Лёлик Панадол"
+                      ];
+                      const currentVal = gmMerchantNameInput !== undefined ? gmMerchantNameInput : tavernSettings.merchantName;
+                      const filtered = M_NAMES.filter(n => n !== currentVal);
+                      const randomMerchant = filtered[Math.floor(Math.random() * filtered.length)] || M_NAMES[0];
+                      setGmMerchantNameInput(randomMerchant);
+                      if (ws) {
+                        ws.send(JSON.stringify({
+                          type: "GM_UPDATE_TAVERN_SETTINGS",
+                          payload: { merchantName: randomMerchant }
+                        }));
+                        setPdaAlert({ text: `Сгенерирован торговец: ${randomMerchant}`, type: "info" });
+                        setTimeout(() => setPdaAlert(null), 2500);
+                      }
+                    }}
+                    className="bg-gray-800 hover:bg-gray-750 text-gray-300 font-bold py-1.5 px-3 rounded uppercase text-[10px] cursor-pointer transition-all border border-gray-700 hover:border-gray-600"
+                  >
+                    <Dices className='w-3.5 h-3.5 inline mr-1 text-sky-400' /> Случайно
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Right Columns: Game Toggles (Trades, Pazaak, Dice, Races, Slots, Roulette, Shooting, Thimblerig, Svinya) */}
+            <div className="lg:col-span-2 space-y-2">
+              <label className="block text-gray-400 font-bold text-[10px] uppercase tracking-wider"><Lock className='w-3.5 h-3.5 inline mr-1 text-sky-400' /> ПЛАШКА МИНИ-ИГР (Заблок. / Разблок. в КПК Сталкеров):</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {[
+                  { key: "trades", label: "Скупка & Торговля" },
+                  { key: "pazaak", label: "Паазак" },
+                  { key: "dice", label: "Кости" },
+                  { key: "races", label: "Тараканьи Скачки" },
+                  { key: "slots", label: "Слот-Машина" },
+                  { key: "roulette", label: "Рулетка Зоны" },
+                  { key: "shooting", label: "Кустарный Тир" },
+                  { key: "thimblerig", label: "Напёрстки" },
+                  { key: "svinya", label: "Игра «Свинья»" }
+                ].map((itm) => {
+                  const isEnabled = tavernSettings.enabledGames[itm.key as keyof typeof tavernSettings.enabledGames];
+                  return (
+                    <button
+                      key={itm.key}
+                      onClick={() => {
+                        const newGames = { ...tavernSettings.enabledGames, [itm.key]: !isEnabled };
+                        if (ws) {
+                          ws.send(JSON.stringify({
+                            type: "GM_UPDATE_TAVERN_SETTINGS",
+                            payload: { enabledGames: newGames }
+                          }));
+                          setPdaAlert({ text: `Режим "${itm.label}" ${!isEnabled ? "РАЗЛОЧЕН" : "ЗАБЛОКИРОВАН"} для сталкеров`, type: "info" });
+                          setTimeout(() => setPdaAlert(null), 2500);
+                        }
+                      }}
+                      className={`py-2 px-2.5 rounded border text-[11px] uppercase font-bold text-center transition-all cursor-pointer ${
+                        isEnabled
+                          ? "bg-emerald-950/40 border-emerald-500/80 text-emerald-400 hover:bg-emerald-900/30"
+                          : "bg-red-950/30 border-red-900/80 text-red-400 hover:bg-red-900/20 line-through"
+                      }`}
+                    >
+                      {itm.label}: {isEnabled ? "ОТКРЫТО" : "ЗАКРЫТО"}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          
+          {/* GM Column 1: Flea Market Catalogue Manager */}
+          <div className="bg-gray-950 p-4 rounded border border-gray-800 space-y-4">
+            <h5 className="font-bold font-mono text-xs text-amber-500 uppercase pb-1 border-b border-gray-850 flex items-center justify-between">
+              <span><Wrench className="w-4 h-4 inline-block mr-1" /> Ассортимент товаров у {tavernSettings.merchantName || "Сидоровича"}</span>
+              <span className="text-[9px] text-gray-500">БД ТОРГОВЛИ</span>
+            </h5>
+            
+            <div className="space-y-2.5 text-xs font-mono">
+              <div className="w-full overflow-x-auto pb-1 mt-1 -mb-1 scrollbar-hide">
+                <div className="flex gap-2 min-w-max">
+                  <span className="text-[10px] text-gray-500 uppercase flex flex-col justify-center select-none">Шаблоны:</span>
+                  {[
+                    { name: 'Водка «Казаки»', price: '50', type: 'med', desc: '-10 RAD, лечит душу' },
+                    { name: 'Аптечка АИ-2', price: '150', type: 'med', desc: '+50 HP' },
+                    { name: 'Бинт', price: '30', type: 'med', desc: 'Останавливает кровотечение' },
+                    { name: 'Антирад', price: '200', type: 'med', desc: '-50 RAD' },
+                    { name: 'Консервы «Завтрак туриста»', price: '45', type: 'misc', desc: 'Утоляет голод' },
+                    { name: 'Энергетик «Stalker»', price: '60', type: 'misc', desc: '+Выносливость' },
+                    { name: 'Болты', price: '5', type: 'misc', desc: 'Для проверки аномалий' },
+                    { name: 'Патроны 9x18', price: '80', type: 'ammo', desc: 'Коробка (30 шт)' },
+                    { name: 'Патроны 5.45x39', price: '120', type: 'ammo', desc: 'Коробка (30 шт)' },
+                    { name: 'Дробь', price: '100', type: 'ammo', desc: 'Коробка 12 калибр (10 шт)' },
+                    { name: 'Пистолет ПМм', price: '450', type: 'weapon', desc: 'Стандартный ствол новичка' },
+                    { name: 'Обрез ружья', price: '600', type: 'weapon', desc: 'Убойный вблизи' },
+                    { name: 'АКМ 74/2', price: '2200', type: 'weapon', desc: 'Надежный штурмовой автомат' },
+                    { name: 'Кожаная куртка', price: '300', type: 'armor', desc: 'Защита: слабая' },
+                    { name: 'Заря', price: '1500', type: 'armor', desc: 'Костюм сталкера' },
+                    { name: 'Артефакт «Медуза»', price: '800', type: 'art', desc: '-2 RAD, пулестойкость' },
+                    { name: 'Артефакт «Кровь камня»', price: '1200', type: 'art', desc: '+5 ХП/сек' },
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        setGmItemName(preset.name);
+                        setGmItemPrice(preset.price);
+                        setGmItemType(preset.type);
+                        setGmItemDesc(preset.desc);
+                      }}
+                      className="bg-gray-800 hover:bg-gray-750 text-gray-300 hover:text-amber-400 border border-gray-700 hover:border-amber-900/50 rounded px-2 py-1 text-[10px] transition-colors cursor-pointer select-none"
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {shopItems.length > 0 && (
+                <div className="w-full overflow-x-auto pb-1 mt-1 scrollbar-hide">
+                  <div className="flex gap-2 min-w-max">
+                    <span className="text-[10px] text-amber-500/70 uppercase flex flex-col justify-center select-none" title="Drag & Drop!"><Store className='w-3.5 h-3.5 inline mr-1 text-amber-500' /> ИЗ БАЗЫ:</span>
+                    {shopItems.map((item: any) => (
+                      <div
+                        key={`drag-${item.id}`}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("application/json", JSON.stringify(item));
+                        }}
+                        onClick={() => {
+                          setGmItemName(item.name || "");
+                          setGmItemPrice(item.price !== undefined && item.price !== null ? item.price.toString() : "0");
+                          setGmItemType(item.type || "misc");
+                          setGmItemDesc(item.description || "");
+                        }}
+                        className="bg-amber-950/30 hover:bg-amber-900/50 text-amber-500/80 hover:text-amber-400 border border-amber-900/30 hover:border-amber-500/50 rounded px-2 py-1 text-[10px] transition-colors cursor-grab active:cursor-grabbing select-none"
+                        title="Перетащите вниз или кликните"
+                      >
+                        {item.name}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div 
+                className="bg-gray-900/30 p-2 rounded border border-dashed border-gray-800 transition-colors"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  try {
+                    const data = JSON.parse(e.dataTransfer.getData("application/json"));
+                    if (data && data.name) {
+                      setGmItemName(data.name || "");
+                      setGmItemPrice(data.price !== undefined && data.price !== null ? data.price.toString() : "100");
+                      setGmItemType(data.type || "misc");
+                      setGmItemDesc(data.description || "");
+                      setPdaAlert({ text: "Предмет загружен из Drag&Drop", type: "success" });
+                      setTimeout(() => setPdaAlert(null), 1500);
+                    }
+                  } catch (err) {}
+                }}
+              >
+                <div>
+                  <label className="block text-gray-400 mb-1">Название предмета:</label>
+                  <input
+                    type="text"
+                    placeholder="Drop data here! Или введите: Аптечка"
+                    value={gmItemName}
+                    onChange={(e) => setGmItemName(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded p-2 text-xs font-mono text-gray-200 outline-none focus:border-amber-900"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <label className="block text-gray-400 mb-1">Цена (в кр.):</label>
+                    <input
+                      type="number"
+                      placeholder="150"
+                      value={gmItemPrice}
+                      onChange={(e) => setGmItemPrice(e.target.value)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded p-2 text-xs font-mono text-gray-200 outline-none focus:border-amber-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1">Категория:</label>
+                    <select
+                      value={gmItemType}
+                      onChange={(e: any) => setGmItemType(e.target.value)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded p-2 text-xs font-mono text-gray-205 outline-none focus:border-amber-900"
+                    >
+                      <option value="misc">Разное</option>
+                      <option value="weapon">Оружие</option>
+                      <option value="ammo">Боеприпасы</option>
+                      <option value="med">Медикаменты</option>
+                      <option value="armor">Защита/Броня</option>
+                      <option value="art">Артефакт</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mt-2">
+                  <label className="block text-gray-400 mb-1">Описание/Эффект:</label>
+                  <input
+                    type="text"
+                    placeholder="Защищает от пси-излучения, +50 HP"
+                    value={gmItemDesc}
+                    onChange={(e) => setGmItemDesc(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded p-2 text-xs font-mono text-gray-200 outline-none focus:border-amber-900"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  onClick={() => {
+                    if (!gmItemName.trim()) {
+                      setPdaAlert({ text: "Введите название предмета!", type: "danger" });
+                      setTimeout(() => setPdaAlert(null), 2500);
+                      return;
+                    }
+                    if (ws) {
+                      ws.send(JSON.stringify({
+                        type: "GM_ADD_SHOP_ITEM",
+                        payload: {
+                          name: gmItemName.trim(),
+                          price: parseInt(gmItemPrice, 10) || 100,
+                          type: gmItemType,
+                          description: gmItemDesc.trim()
+                        }
+                      }));
+                      setGmItemName("");
+                      setGmItemDesc("");
+                    }
+                  }}
+                  className="flex-1 bg-amber-600 hover:bg-amber-500 text-gray-950 font-bold py-2.5 rounded uppercase tracking-wider cursor-pointer text-center text-xs"
+                >
+                  <Plus className='w-3.5 h-3.5 inline mr-1 text-gray-950 stroke-[3]' /> Добавить на прилавок
+                </button>
+                
+                <button
+                  onClick={() => {
+                    if (!gmItemName.trim()) {
+                      setPdaAlert({ text: "Введите название для вброса в рюкзак отряда!", type: "danger" });
+                      setTimeout(() => setPdaAlert(null), 2500);
+                      return;
+                    }
+                    if (ws) {
+                      ws.send(JSON.stringify({
+                        type: "GM_ADD_TO_INVENTORY",
+                        payload: { itemName: gmItemName.trim() }
+                      }));
+                    }
+                  }}
+                  className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-2 rounded font-bold uppercase cursor-pointer text-xs text-center"
+                  title="Выдать сразу в походный рюкзак отряда"
+                >
+                  В рюкзак <Briefcase className='w-3.5 h-3.5 inline ml-1 text-gray-400' />
+                </button>
+              </div>
+            </div>
+
+            {/* Catalogue deleter list display */}
+            <div className="space-y-1.5 pt-3 border-t border-gray-850">
+              <div className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Текущие товары на удаление:</div>
+              <div className="space-y-1 max-h-[140px] overflow-y-auto bg-gray-900/50 p-2 rounded border border-gray-850">
+                {shopItems.map((item: any) => (
+                  <div key={item.id} className="flex justify-between items-center bg-gray-950 px-2 py-1.5 rounded border border-gray-900 text-[11px] font-mono text-gray-300">
+                    <div>
+                      <span className="font-bold">{item.name}</span> • <span className="text-amber-500">{formatCredits(item.price)}</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (ws) {
+                          ws.send(JSON.stringify({
+                            type: "GM_DELETE_SHOP_ITEM",
+                            payload: { itemId: item.id }
+                          }));
+                        }
+                      }}
+                      className="text-red-400 hover:text-red-500 cursor-pointer p-0.5"
+                      title="Удалить товар навсегда"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+
+          {/* GM Column 2: Total Player Database Control */}
+          <div className="bg-gray-950 p-4 rounded border border-gray-800 space-y-4">
+            <h5 className="font-bold font-mono text-xs text-amber-500 uppercase pb-1 border-b border-gray-850">
+              Профайлы & База Данных КПК Сталкеров
+            </h5>
+
+            <div className="space-y-3.5 text-xs font-mono">
+              <div>
+                <label className="block text-gray-400 mb-1">Выберите Сталкера для редактирования:</label>
+                <select
+                  value={gmSelectedPlayerId}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setGmSelectedPlayerId(val);
+                    if (playerDb[val] && playerDb[val].balance !== undefined && playerDb[val].balance !== null) {
+                      setGmPlayerBalanceInput(playerDb[val].balance.toString());
+                    } else {
+                      setGmPlayerBalanceInput("0");
+                    }
+                  }}
+                  className="w-full bg-gray-900 border border-gray-800 rounded p-2 text-xs font-mono text-amber-400 font-bold outline-none focus:border-amber-900"
+                >
+                  <option value="">-- Выберите игрока --</option>
+                  {Object.keys(playerDb).map((pId) => (
+                    <option key={pId} value={pId}>
+                      {playerDb[pId]?.userName || pId} (Баланс: {formatCredits(playerDb[pId]?.balance || 0)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {gmSelectedPlayerId && playerDb[gmSelectedPlayerId] && (
+                <div className="space-y-3.5 bg-gray-900/60 p-3 rounded border border-gray-850">
+                  
+                  {/* Part A: Set absolute balance */}
+                  <div className="grid grid-cols-3 gap-2 items-end">
+                    <div className="col-span-2">
+                      <label className="block text-gray-550 mb-1 text-[10px]">Баланс на счете (в кредитах):</label>
+                      <input
+                        type="number"
+                        value={gmPlayerBalanceInput}
+                        onChange={(e) => setGmPlayerBalanceInput(e.target.value)}
+                        className="w-full bg-gray-950 border border-gray-800 rounded p-1.5 text-xs text-amber-400 font-mono font-bold"
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (ws && gmSelectedPlayerId) {
+                          ws.send(JSON.stringify({
+                            type: "GM_SET_PLAYER_BALANCE",
+                            payload: { targetPlayerId: gmSelectedPlayerId, balance: gmPlayerBalanceInput }
+                          }));
+                          setPdaAlert({ text: `Баланс игрока изменен на ${formatCredits(parseInt(gmPlayerBalanceInput) || 0)}`, type: "success" });
+                          setTimeout(() => setPdaAlert(null), 2500);
+                        }
+                      }}
+                      className="bg-amber-600 hover:bg-amber-500 text-gray-950 py-1.5 font-bold rounded text-[11px] cursor-pointer text-center"
+                    >
+                      Применить
+                    </button>
+                  </div>
+
+                  {/* Part B: Unlock Pazaak premium modifier cards */}
+                  <div className="grid grid-cols-3 gap-2 items-end">
+                    <div className="col-span-2">
+                      <label className="block text-gray-550 mb-1 text-[10px]">Выдать карту Паазака:</label>
+                      <select
+                        value={gmPlayerCardToUnlock}
+                        onChange={(e) => setGmPlayerCardToUnlock(e.target.value)}
+                        className="w-full bg-gray-950 border border-gray-800 rounded p-1.5 text-[11px] font-mono text-purple-300"
+                      >
+                        <option value="">-- Выберите карту --</option>
+                        <option value="+/-1">+/-1 (Флип)</option>
+                        <option value="+/-2">+/-2 (Флип)</option>
+                        <option value="+/-3">+/-3 (Флип)</option>
+                        <option value="+/-4">+/-4 (Флип)</option>
+                        <option value="+/-5">+/-5 (Флип)</option>
+                        <option value="+/-6">+/-6 (Флип)</option>
+                        <option value="D">D (Double - Удвоение)</option>
+                        <option value="T">T (Tie breaker - Ничья)</option>
+                        <option value="3 & 6">3 & 6 (Смена знаков 3/6)</option>
+                        <option value="2 & 4">2 & 4 (Смена знаков 2/4)</option>
+                      </select>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (!gmPlayerCardToUnlock) {
+                          setPdaAlert({ text: "Выберите карту для разблокировки!", type: "info" });
+                          setTimeout(() => setPdaAlert(null), 2500);
+                          return;
+                        }
+                        if (ws && gmSelectedPlayerId) {
+                          ws.send(JSON.stringify({
+                            type: "GM_UNLOCK_PLAYER_CARDS",
+                            payload: { targetPlayerId: gmSelectedPlayerId, card: gmPlayerCardToUnlock }
+                          }));
+                          setPdaAlert({ text: `Игроку выдана карта [${gmPlayerCardToUnlock}]!`, type: "success" });
+                          setTimeout(() => setPdaAlert(null), 2500);
+                        }
+                      }}
+                      className="bg-purple-900 hover:bg-purple-700 text-purple-100 py-1.5 font-bold rounded text-[11px] border border-purple-700 cursor-pointer text-center"
+                    >
+                      Выдать
+                    </button>
+                  </div>
+
+                  {/* Profile Reset action */}
+                  <div className="pt-2 border-t border-gray-800">
+                    <button
+                      onClick={() => {
+                        if (confirm("Вы на сто процентов уверены? Будет сброшен баланс до 1000 и дефолтный набор карт!") && ws && gmSelectedPlayerId) {
+                          ws.send(JSON.stringify({
+                            type: "GM_RESET_PLAYER_PROFILE",
+                            payload: { targetPlayerId: gmSelectedPlayerId }
+                          }));
+                          setPdaAlert({ text: "Профиль игрока полностью сброшен!", type: "info" });
+                          setTimeout(() => setPdaAlert(null), 2500);
+                        }
+                      }}
+                      className="w-full bg-red-950 hover:bg-red-900 text-red-300 hover:text-white border border-red-900 py-2 rounded text-center font-bold text-[10px] uppercase tracking-wider cursor-pointer transition-colors"
+                    >
+                      <CustomWarning />️ Полный Сброс Профиля Сталкера
+                    </button>
+                  </div>
+
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+      </div>
+    );
+  };
+
+  if (viewMode === "admin") {
+    return (
+      <div className="h-full flex flex-col bg-gray-900 border border-gray-800 rounded-lg overflow-hidden shadow-2xl relative">
+        <div className="bg-gray-950 px-4 py-3 border-b border-gray-800 flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <Wrench className="w-5 h-5 text-amber-500 animate-pulse" />
+            <div>
+              <div className="text-[10px] font-mono text-gray-500 uppercase tracking-widest leading-none">ПУЛЬТ КУРАТОРА ИГРЫ</div>
+              <div className="font-mono text-xs font-bold text-amber-400 mt-1 uppercase">
+                {tavernSettings.tavernName}
+              </div>
+            </div>
+          </div>
+          <div className="bg-amber-950 text-amber-300 px-2 py-0.5 rounded text-[10px] border border-amber-900/50 uppercase font-mono font-bold">
+            Администратор Зоны
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+          {renderCuratorPane()}
+        </div>
+        {pdaAlert && (
+          <div className={`p-4 text-center font-mono text-xs font-bold border-t ${
+            pdaAlert.type === "success" 
+              ? "bg-emerald-950/85 text-emerald-400 border-emerald-900" 
+              : pdaAlert.type === "danger"
+                ? "bg-red-950/85 text-red-400 border-red-900"
+                : "bg-amber-950/85 text-amber-400 border-amber-900"
+          }`}>
+            <span>{pdaAlert.text}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="h-full flex flex-col bg-gray-900 border border-gray-800 rounded-lg overflow-hidden shadow-2xl relative">
+    <div className="h-full flex flex-col bg-gray-900 border border-gray-850 rounded-lg overflow-hidden shadow-2xl relative">
       {/* HUD Bar Wallet / КПК Счета */}
       <div className="bg-gray-950 px-4 py-3 flex flex-wrap justify-between items-center border-b border-gray-800">
         <div className="flex flex-wrap items-center gap-3">
@@ -1007,39 +2143,41 @@ export const Tavern: React.FC<TavernProps> = ({
           </div>
           <div>
             <div className="text-[10px] font-mono text-gray-500 uppercase tracking-widest leading-none">Личный Баланс КПК</div>
-            <div className="font-mono text-lg font-bold text-emerald-400 leading-none mt-1">
-              {playerProfile.balance?.toLocaleString()} <span className="text-xs text-gray-500">RU</span>
+            <div className="font-mono text-base font-bold text-emerald-400 leading-none mt-1">
+              {formatCredits(playerProfile.balance || 0)}
             </div>
           </div>
           {/* Dynamic Tavern name badge */}
           <div className="bg-slate-900 text-amber-500 border border-amber-900/30 px-3 py-1.5 rounded text-xs uppercase font-mono tracking-wider font-extrabold flex items-center gap-1.5 shadow-inner my-1 sm:my-0">
-            <span>🍺</span>
+            <span><Beer className='w-4 h-4 text-amber-500 animate-bounce' /></span>
             <span>{tavernSettings.tavernName}</span>
           </div>
         </div>
 
         {/* Tab Sub-selectors */}
-        <div className="flex bg-gray-900 p-1 rounded border border-gray-800 text-xs font-mono select-none mt-2 sm:mt-0">
+        <div className="flex flex-wrap bg-gray-900 p-1 rounded border border-gray-800 text-xs font-mono select-none mt-2 sm:mt-0 gap-1">
           <button
             onClick={() => setActiveSubTab("trades")}
-            className={`px-3 py-1 rounded transition-all cursor-pointer ${
+            className={`px-3 py-1 rounded transition-all cursor-pointer flex items-center gap-1.5 ${
               activeSubTab === "trades" 
                 ? "bg-slate-800 text-slate-200 font-bold" 
                 : "text-gray-500 hover:text-gray-300"
             }`}
           >
+            <Briefcase className="w-3.5 h-3.5" />
             Свалка Скупщика
           </button>
           
           {(tavernSettings.enabledGames.pazaak || isGM) && (
             <button
               onClick={() => setActiveSubTab("pazaak")}
-              className={`px-3 py-1 rounded transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeSubTab === "pazaak" 
                   ? "bg-emerald-900/40 text-emerald-400 font-bold border-emerald-900" 
                   : "text-gray-500 hover:text-gray-300"
               }`}
             >
+              <Package className="w-3.5 h-3.5" />
               Паазак
             </button>
           )}
@@ -1047,12 +2185,13 @@ export const Tavern: React.FC<TavernProps> = ({
           {(tavernSettings.enabledGames.dice || isGM) && (
             <button
               onClick={() => setActiveSubTab("dice")}
-              className={`px-3 py-1 rounded transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeSubTab === "dice" 
                   ? "bg-sky-950/40 text-sky-400 font-bold" 
                   : "text-gray-500 hover:text-gray-300"
               }`}
             >
+              <Dices className="w-3.5 h-3.5" />
               Покер на Костях
             </button>
           )}
@@ -1060,12 +2199,13 @@ export const Tavern: React.FC<TavernProps> = ({
           {(tavernSettings.enabledGames.races || isGM) && (
             <button
               onClick={() => setActiveSubTab("races")}
-              className={`px-3 py-1 rounded transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeSubTab === "races" 
                   ? "bg-yellow-950/40 text-yellow-500 font-bold" 
                   : "text-gray-500 hover:text-gray-300"
               }`}
             >
+              <Bug className="w-3.5 h-3.5" />
               Тараканьи Бега
             </button>
           )}
@@ -1073,12 +2213,13 @@ export const Tavern: React.FC<TavernProps> = ({
           {(tavernSettings.enabledGames.slots || isGM) && (
             <button
               onClick={() => setActiveSubTab("slots")}
-              className={`px-3 py-1 rounded transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeSubTab === "slots" 
                   ? "bg-purple-950/40 text-purple-400 font-bold border-purple-900" 
                   : "text-gray-500 hover:text-gray-300"
               }`}
             >
+              <Gamepad2 className="w-3.5 h-3.5" />
               Реактор-Слот
             </button>
           )}
@@ -1086,12 +2227,13 @@ export const Tavern: React.FC<TavernProps> = ({
           {(tavernSettings.enabledGames.roulette || isGM) && (
             <button
               onClick={() => setActiveSubTab("roulette")}
-              className={`px-3 py-1 rounded transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeSubTab === "roulette" 
                   ? "bg-red-950/40 text-red-500 font-bold border-red-900" 
                   : "text-gray-500 hover:text-gray-300"
               }`}
             >
+              <Circle className="w-3.5 h-3.5" />
               Радар-Рулетка
             </button>
           )}
@@ -1099,13 +2241,42 @@ export const Tavern: React.FC<TavernProps> = ({
           {(tavernSettings.enabledGames.shooting || isGM) && (
             <button
               onClick={() => setActiveSubTab("shooting")}
-              className={`px-3 py-1 rounded transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeSubTab === "shooting" 
                   ? "bg-orange-950/40 text-orange-500 font-bold border-orange-900" 
                   : "text-gray-500 hover:text-gray-300"
               }`}
             >
+              <Crosshair className="w-3.5 h-3.5" />
               КПК-Тир
+            </button>
+          )}
+
+          {(tavernSettings.enabledGames.thimblerig || isGM) && (
+            <button
+              onClick={() => setActiveSubTab("thimblerig")}
+              className={`px-3 py-1 rounded transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeSubTab === "thimblerig" 
+                  ? "bg-teal-950/40 text-teal-400 font-bold border-teal-900" 
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              <VenetianMask className="w-3.5 h-3.5" />
+              Напёрстки
+            </button>
+          )}
+
+          {(tavernSettings.enabledGames.svinya || isGM) && (
+            <button
+              onClick={() => setActiveSubTab("svinya")}
+              className={`px-3 py-1 rounded transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeSubTab === "svinya" 
+                  ? "bg-pink-950/40 text-pink-400 font-bold border-pink-900" 
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              <PiggyBank className="w-3.5 h-3.5" />
+              Свинья (Карты)
             </button>
           )}
         </div>
@@ -1138,16 +2309,16 @@ export const Tavern: React.FC<TavernProps> = ({
           !tavernSettings.enabledGames.trades && !isGM ? (
             <div className="text-center py-16 bg-gray-950/40 rounded border border-dashed border-red-900/40 p-8">
               <Lock className="w-12 h-12 text-red-500 mx-auto mb-3 animate-pulse" />
-              <h3 className="text-red-400 font-bold uppercase font-mono tracking-wider text-sm">Скупка Сидоровича временно приостановлена</h3>
+              <h3 className="text-red-400 font-bold uppercase font-mono tracking-wider text-sm">Скупка у {tavernSettings.merchantName || "Сидоровича"} приостановлена</h3>
               <p className="text-gray-400 text-xs mt-2 font-mono max-w-sm mx-auto leading-relaxed">
-                Торговая лавка скупщика Сидоровича временно закрыта куратором бара. Передача хабара недоступна.
+                Торговая лавка скупщика {tavernSettings.merchantName || "Сидоровича"} временно закрыта куратором бара. Передача хабара недоступна.
               </p>
             </div>
           ) : (
             <div className="space-y-6">
               {!tavernSettings.enabledGames.trades && (
                 <div className="bg-red-950/40 border border-red-900 text-red-400 text-[11px] font-mono px-3 py-2 rounded text-center uppercase font-bold tracking-wider animate-pulse">
-                  🛡️ ВНИМАНИЕ КУРАТОРА: Торговля временно ОТКЛЮЧЕНА для сталкеров!
+                  ВНИМАНИЕ КУРАТОРА: Торговля временно ОТКЛЮЧЕНА для сталкеров!
                 </div>
               )}
               <div className="bg-gray-950 ring-1 ring-gray-850 rounded p-4 flex flex-col md:flex-row gap-6 items-center">
@@ -1156,16 +2327,16 @@ export const Tavern: React.FC<TavernProps> = ({
               </div>
               <div className="text-center md:text-left flex-1">
                 <h3 className="font-bold text-amber-500 uppercase tracking-wider text-sm font-mono flex items-center justify-center md:justify-start gap-2">
-                  <span>Торговая лавка Сидоровича</span>
+                  <span>Торговая лавка {tavernSettings.merchantName || "Сидоровича"}</span>
                   <span className="text-[10px] text-gray-500 bg-gray-900 border border-gray-800 px-2 py-0.5 rounded uppercase font-bold tracking-widest font-mono">Барахолка</span>
                 </h3>
                 <p className="text-gray-400 text-xs mt-1 leading-relaxed">
-                  Принесли ценный хабар с Зоны? Сдайте его торговцу Сидоровичу. Артефакты ценятся дорого (600-1000+ RU), запчасти и консервы - подешевле. Заработанные RU можно потратить прямо тут на покупку снаряжения, которое зачислится прямо в текущую Экспедицию!
+                  Принесли ценный хабар с Зоны? Сдайте его торговцу {tavernSettings.merchantName || "Сидоровичу"}. Артефакты ценятся дорого (600-1000+ кредитов), запчасти и консервы - подешевле. Заработанные кредиты можно потратить прямо тут на покупку снаряжения, которое зачислится прямо в текущую Экспедицию!
                 </p>
               </div>
               <div className="bg-amber-950/30 border border-amber-900/50 p-2.5 rounded text-center shrink-0 min-w-[130px]">
                 <div className="text-[10px] font-mono text-amber-500/80 uppercase font-semibold">Ваш счет PDA</div>
-                <div className="text-lg font-mono font-black text-amber-400 mt-0.5">{playerProfile.balance} RU</div>
+                <div className="text-sm font-mono font-black text-amber-400 mt-0.5">{formatCredits(playerProfile.balance || 0)}</div>
               </div>
             </div>
 
@@ -1175,7 +2346,7 @@ export const Tavern: React.FC<TavernProps> = ({
               {/* Left Column: Sell Items (Group pack) */}
               <div className="space-y-3">
                 <div className="flex justify-between items-center pb-1.5 border-b border-gray-800">
-                  <h4 className="font-bold font-mono text-xs text-gray-300 uppercase tracking-widest">🎒 Рюкзак Отряда (Продажа хабара)</h4>
+                  <h4 className="font-bold font-mono text-xs text-gray-300 uppercase tracking-widest"><Briefcase className='w-3.5 h-3.5 inline mr-1 text-gray-300' /> Рюкзак Отряда (Продажа хабара)</h4>
                   <span className="text-[10px] font-mono text-gray-500 bg-gray-950 px-2 py-0.5 rounded border border-gray-850">
                     Всего: {gameMap?.inventory?.length || 0} шт.
                   </span>
@@ -1183,7 +2354,7 @@ export const Tavern: React.FC<TavernProps> = ({
 
                 {!gameMap || !gameMap.inventory || gameMap.inventory.length === 0 ? (
                   <div className="border border-dashed border-gray-800/80 rounded p-6 text-center text-gray-500 text-xs font-mono bg-gray-950/30">
-                    Рюкзак отряда пока пуст. Спланируйте Экспедицию, обыскивайте зараженные аномальные схроны 📦 или собирайте артефакты 💎 на карте, затем заглядывайте сюда!
+                    Рюкзак отряда пока пуст. Спланируйте Экспедицию, обыскивайте зараженные аномальные схроны <Package className='w-3.5 h-3.5 inline text-gray-400 mx-0.5' /> или собирайте артефакты <Gem className='w-3.5 h-3.5 inline text-cyan-400 mx-0.5' /> на карте, затем заглядывайте сюда!
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
@@ -1196,12 +2367,12 @@ export const Tavern: React.FC<TavernProps> = ({
                         >
                           <div className="flex gap-2.5 items-center">
                             <span className={`text-base p-1 rounded ${isArt ? "bg-cyan-950/50 text-cyan-400 border border-cyan-900" : "bg-gray-900 text-gray-400 border border-gray-800"}`}>
-                              {isArt ? "💎" : "📦"}
+                              {isArt ? <Gem className='w-4 h-4 text-cyan-400' /> : <Package className='w-4 h-4 text-gray-400' />}
                             </span>
                             <div>
                               <div className={`text-xs font-mono font-bold ${isArt ? "text-cyan-400" : "text-gray-300"}`}>{item}</div>
-                              <div className="text-[9px] text-gray-550 font-mono">
-                                Оценка Сидоровича: {isArt ? "~600-1000 RU" : "~150-250 RU"}
+                              <div className="text-[9px] text-gray-555 font-mono">
+                                Оценка скупщика: {isArt ? "~600-1000 кр." : "~150-250 кр."}
                               </div>
                             </div>
                           </div>
@@ -1219,10 +2390,10 @@ export const Tavern: React.FC<TavernProps> = ({
                 )}
               </div>
 
-              {/* Right Column: Sidorovich Shop Catalogue */}
+              {/* Right Column: Dynamic Shop Catalogue */}
               <div className="space-y-3">
                 <div className="flex justify-between items-center pb-1.5 border-b border-gray-800">
-                  <h4 className="font-bold font-mono text-xs text-amber-400 uppercase tracking-widest">🛒 Ассортимент Прилавка (Покупка снаряжения)</h4>
+                  <h4 className="font-bold font-mono text-xs text-amber-400 uppercase tracking-widest"><Store className='w-3.5 h-3.5 inline mr-1 text-amber-400' /> Ассортимент Прилавка (Покупка снаряжения)</h4>
                   <span className="text-[10px] font-mono text-gray-500 bg-gray-950 px-2 py-0.5 rounded border border-gray-850">
                     Активно: {shopItems.length} поз.
                   </span>
@@ -1230,7 +2401,7 @@ export const Tavern: React.FC<TavernProps> = ({
 
                 {shopItems.length === 0 ? (
                   <div className="border border-dashed border-amber-900/45 rounded p-6 text-center text-gray-500 text-xs font-mono bg-gray-950/20">
-                    У Сидоровича кончились запасы товаров на продажу. Попросите куратора добавить предметов!
+                    На прилавке торговца кончились запасы товаров на продажу. Попросите куратора добавить предметов!
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
@@ -1258,7 +2429,7 @@ export const Tavern: React.FC<TavernProps> = ({
                           </div>
                           <div className="text-right shrink-0 flex items-center gap-2.5">
                             <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/40 px-2.5 py-1 rounded border border-emerald-900/60 shrink-0">
-                              {item.price} RU
+                              {formatCredits(item.price)}
                             </span>
                             <button
                               onClick={() => {
@@ -1289,63 +2460,180 @@ export const Tavern: React.FC<TavernProps> = ({
             </div>
 
             {/* CURATOR GM ADMINISTRATION PANELS BLOCK (Visible only if isGM is true) */}
-            {isGM && (
+            {false && (
               <div className="mt-8 border-t border-gray-850 pt-8 space-y-6">
                 <div className="bg-amber-950/15 border border-amber-900/60 rounded p-4">
                   <div className="flex items-center gap-2 pb-1 text-sm font-bold font-mono text-amber-500 uppercase tracking-wider">
                     <Wrench className="w-4 h-4 text-amber-500" />
-                    <span>⚙️ ПАНЕЛЬ КУРАТОРА: База Сталкеров & Барахолка Сидоровича</span>
+                    <div className="flex items-center gap-1.5">
+                      <Settings className="w-4 h-4" />
+                      <span>АДМИН-ПАНЕЛЬ КУРАТОРА: База Сталкеров & Торговля</span>
+                    </div>
                   </div>
                   <p className="text-gray-400 text-xs font-mono">
-                    Вы авторизованы как куратор (GM). Ниже вам доступно прямое администрирование счетов сталкеров, добавление/удаление постоянных товаров в БД Сидоровича и выдача карт.
+                    Вы авторизованы как куратор (GM). Ниже вам доступно прямое управление заведением, ручной ввод или генерация названий, переключение режима доступности мини-игр и выдача снаряжения.
                   </p>
                 </div>
 
                 {/* Tavern name edit & Game toggles */}
-                <div className="bg-gray-950 p-4 rounded border border-gray-850 space-y-4">
-                  <div className="text-amber-500 font-bold font-mono text-xs uppercase pb-1.5 border-b border-gray-800">
-                    ⚙️ Параметры Заведения & Доступность Мини-Игр
+                <div className="bg-gray-950 p-5 rounded border border-gray-850 space-y-5">
+                  <div className="text-amber-500 font-bold font-mono text-xs uppercase pb-1.5 border-b border-gray-800 flex items-center justify-between">
+                    <span><Settings className="w-4 h-4 text-amber-500 inline mr-1" /> ПАРАМЕТРЫ ЛОКАЦИИ & ДОСТУПНОСТЬ МИНИ-ИГР ЗОНЫ</span>
+                    <span className="text-[9px] text-gray-550 border border-gray-800 px-2 py-0.5 rounded font-bold">GM CONTROL PANEL</span>
                   </div>
+                  
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-xs font-mono">
-                    <div className="space-y-2">
-                      <label className="block text-gray-400">Название Таверны:</label>
-                      <div className="flex gap-2">
+                    {/* Left Column: Tavern & Merchant customizer */}
+                    <div className="space-y-4 border-r border-gray-905 lg:pr-6">
+                      
+                      {/* Tavern name input */}
+                      <div className="space-y-1.5">
+                        <label className="block text-gray-400 font-bold uppercase text-[10px] tracking-wider"><Store className='w-3.5 h-3.5 inline mr-1 text-amber-500' /> НАЗВАНИЕ БАРА/ТАВЕРНЫ:</label>
                         <input
                           type="text"
                           value={gmTavernNameInput !== undefined ? gmTavernNameInput : tavernSettings.tavernName}
                           onChange={(e) => setGmTavernNameInput(e.target.value)}
-                          className="flex-1 bg-gray-900 border border-gray-800 rounded p-2 text-xs font-bold font-mono text-gray-200 outline-none focus:border-amber-900"
+                          className="w-full bg-gray-900 border border-gray-800 rounded p-2 text-xs font-bold font-mono text-gray-200 outline-none focus:border-amber-900 focus:ring-1 focus:ring-amber-900/30"
+                          placeholder="Наберите название бара..."
                         />
-                        <button
-                          onClick={() => {
-                            const name = gmTavernNameInput !== undefined ? gmTavernNameInput : tavernSettings.tavernName;
-                            if (ws) {
-                              ws.send(JSON.stringify({
-                                type: "GM_UPDATE_TAVERN_SETTINGS",
-                                payload: { tavernName: name }
-                              }));
-                              setPdaAlert({ text: "Название обновлено!", type: "success" });
-                              setTimeout(() => setPdaAlert(null), 2500);
-                            }
-                          }}
-                          className="bg-amber-600 hover:bg-amber-500 text-gray-950 font-bold px-3 rounded uppercase text-[11px] cursor-pointer"
-                        >
-                          Сохранить
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              const name = gmTavernNameInput !== undefined ? gmTavernNameInput : tavernSettings.tavernName;
+                              if (ws) {
+                                ws.send(JSON.stringify({
+                                  type: "GM_UPDATE_TAVERN_SETTINGS",
+                                  payload: { tavernName: name }
+                                }));
+                                setPdaAlert({ text: "Название локации успешно узаконено!", type: "success" });
+                                setTimeout(() => setPdaAlert(null), 2500);
+                              }
+                            }}
+                            className="flex-1 bg-amber-600 hover:bg-amber-500 text-gray-950 font-bold py-1.5 px-2 rounded uppercase text-[10px] cursor-pointer transition-all active:scale-95"
+                          >
+                            Применить
+                          </button>
+                          <button
+                            onClick={() => {
+                              const T_NAMES = [
+                                "Бар «100 Рентген»",
+                                "Приют Сталкера",
+                                "Кабак «Шестерёнка»",
+                                "База куратора «Холодный Болт»",
+                                "Гремучий Кисель",
+                                "Аномальный Погреб",
+                                "Пьяный Контроллёр",
+                                "Зелёный Дракон",
+                                "У Борова",
+                                "Мёртвый Головастик",
+                                "Кордонский подвал",
+                                "Пересыльный Пункт Группировок",
+                                "Форпост Долга",
+                                "Станция Янов",
+                                "Бар «Штиль»"
+                              ];
+                              const currentVal = gmTavernNameInput !== undefined ? gmTavernNameInput : tavernSettings.tavernName;
+                              const filtered = T_NAMES.filter(n => n !== currentVal);
+                              const randomName = filtered[Math.floor(Math.random() * filtered.length)] || T_NAMES[0];
+                              setGmTavernNameInput(randomName);
+                              if (ws) {
+                                ws.send(JSON.stringify({
+                                  type: "GM_UPDATE_TAVERN_SETTINGS",
+                                  payload: { tavernName: randomName }
+                                }));
+                                setPdaAlert({ text: `Сгенерировано: ${randomName}`, type: "info" });
+                                setTimeout(() => setPdaAlert(null), 2500);
+                              }
+                            }}
+                            className="bg-gray-800 hover:bg-gray-750 text-gray-300 font-bold py-1.5 px-3 rounded uppercase text-[10px] cursor-pointer transition-all border border-gray-700 hover:border-gray-600"
+                          >
+                            <Dices className='w-3.5 h-3.5 inline mr-1 text-sky-400' /> Случайно
+                          </button>
+                        </div>
                       </div>
+
+                      {/* Merchant name input */}
+                      <div className="space-y-1.5">
+                        <label className="block text-gray-400 font-bold uppercase text-[10px] tracking-wider"><User className='w-3.5 h-3.5 inline mr-1 text-amber-500' /> ИМЯ СКУПЩИКА-ТОРГОВЦА:</label>
+                        <input
+                          type="text"
+                          value={gmMerchantNameInput !== undefined ? gmMerchantNameInput : tavernSettings.merchantName}
+                          onChange={(e) => setGmMerchantNameInput(e.target.value)}
+                          className="w-full bg-gray-900 border border-gray-800 rounded p-2 text-xs font-bold font-mono text-gray-200 outline-none focus:border-amber-900 focus:ring-1 focus:ring-amber-900/30"
+                          placeholder="Пример: Сидорович, Сыч, Боров..."
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              const name = gmMerchantNameInput !== undefined ? gmMerchantNameInput : tavernSettings.merchantName;
+                              if (ws) {
+                                ws.send(JSON.stringify({
+                                  type: "GM_UPDATE_TAVERN_SETTINGS",
+                                  payload: { merchantName: name }
+                                }));
+                                setPdaAlert({ text: `Скупщик переименован в "${name}"!`, type: "success" });
+                                setTimeout(() => setPdaAlert(null), 2500);
+                              }
+                            }}
+                            className="flex-1 bg-amber-600 hover:bg-amber-500 text-gray-950 font-bold py-1.5 px-2 rounded uppercase text-[10px] cursor-pointer transition-all active:scale-95"
+                          >
+                            Применить
+                          </button>
+                          <button
+                            onClick={() => {
+                              const M_NAMES = [
+                                "Сидорович",
+                                "Сыч",
+                                "Бармен",
+                                "Боров",
+                                "Зулус",
+                                "Гавайец",
+                                "Сахаров",
+                                "Ашот",
+                                "Каланча",
+                                "Торговец Митяй",
+                                "Дядько Яр",
+                                "Косой",
+                                "Шустрый",
+                                "Суслов",
+                                "Лёлик Панадол"
+                              ];
+                              const currentVal = gmMerchantNameInput !== undefined ? gmMerchantNameInput : tavernSettings.merchantName;
+                              const filtered = M_NAMES.filter(n => n !== currentVal);
+                              const randomMerchant = filtered[Math.floor(Math.random() * filtered.length)] || M_NAMES[0];
+                              setGmMerchantNameInput(randomMerchant);
+                              if (ws) {
+                                ws.send(JSON.stringify({
+                                  type: "GM_UPDATE_TAVERN_SETTINGS",
+                                  payload: { merchantName: randomMerchant }
+                                }));
+                                setPdaAlert({ text: `Сгенерирован торговец: ${randomMerchant}`, type: "info" });
+                                setTimeout(() => setPdaAlert(null), 2500);
+                              }
+                            }}
+                            className="bg-gray-800 hover:bg-gray-750 text-gray-300 font-bold py-1.5 px-3 rounded uppercase text-[10px] cursor-pointer transition-all border border-gray-700 hover:border-gray-600"
+                          >
+                            <Dices className='w-3.5 h-3.5 inline mr-1 text-sky-400' /> Случайно
+                          </button>
+                        </div>
+                      </div>
+
                     </div>
 
+                    {/* Right Columns: Game Toggles (Trades, Pazaak, Dice, Races, Slots, Roulette, Shooting, Thimblerig, Svinya) */}
                     <div className="lg:col-span-2 space-y-2">
-                      <label className="block text-gray-400">Переключение Мини-Игр КПК (Вкл/Выкл для Сталкеров):</label>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <label className="block text-gray-400 font-bold text-[10px] uppercase tracking-wider"><Lock className='w-3.5 h-3.5 inline mr-1 text-sky-400' /> ПЛАШКА МИНИ-ИГР (Заблок. / Разблок. в КПК Сталкеров):</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {[
-                          { key: "trades", label: "Торговля" },
+                          { key: "trades", label: "Скупка & Торговля" },
                           { key: "pazaak", label: "Паазак" },
                           { key: "dice", label: "Кости" },
-                          { key: "races", label: "Скачки" },
-                          { key: "slots", label: "Слоты" },
-                          { key: "roulette", label: "Рулетка" },
-                          { key: "shooting", label: "Тир" }
+                          { key: "races", label: "Тараканьи Скачки" },
+                          { key: "slots", label: "Слот-Машина" },
+                          { key: "roulette", label: "Рулетка Зоны" },
+                          { key: "shooting", label: "Кустарный Тир" },
+                          { key: "thimblerig", label: "Напёрстки" },
+                          { key: "svinya", label: "Игра «Свинья»" }
                         ].map((itm) => {
                           const isEnabled = tavernSettings.enabledGames[itm.key as keyof typeof tavernSettings.enabledGames];
                           return (
@@ -1358,14 +2646,14 @@ export const Tavern: React.FC<TavernProps> = ({
                                     type: "GM_UPDATE_TAVERN_SETTINGS",
                                     payload: { enabledGames: newGames }
                                   }));
-                                  setPdaAlert({ text: `Мини-игра "${itm.label}" ${!isEnabled ? "РАЗЛОЧЕНА" : "ЗАБЛОКИРОВАНА"}`, type: "info" });
+                                  setPdaAlert({ text: `Режим "${itm.label}" ${!isEnabled ? "РАЗЛОЧЕН" : "ЗАБЛОКИРОВАН"} для сталкеров`, type: "info" });
                                   setTimeout(() => setPdaAlert(null), 2500);
                                 }
                               }}
                               className={`py-2 px-2.5 rounded border text-[11px] uppercase font-bold text-center transition-all cursor-pointer ${
                                 isEnabled
-                                  ? "bg-emerald-950/40 border-emerald-500 text-emerald-400"
-                                  : "bg-red-950/30 border-red-900 text-red-400 line-through"
+                                  ? "bg-emerald-950/40 border-emerald-500/80 text-emerald-400 hover:bg-emerald-900/30"
+                                  : "bg-red-950/30 border-red-900/80 text-red-400 hover:bg-red-900/20 line-through"
                               }`}
                             >
                               {itm.label}: {isEnabled ? "ОТКРЫТО" : "ЗАКРЫТО"}
@@ -1381,8 +2669,9 @@ export const Tavern: React.FC<TavernProps> = ({
                   
                   {/* GM Column 1: Flea Market Catalogue Manager */}
                   <div className="bg-gray-950 p-4 rounded border border-gray-800 space-y-4">
-                    <h5 className="font-bold font-mono text-xs text-amber-500 uppercase pb-1 border-b border-gray-850">
-                      🛠️ Наполнение лавки Сидоровича
+                    <h5 className="font-bold font-mono text-xs text-amber-500 uppercase pb-1 border-b border-gray-850 flex items-center justify-between">
+                      <span><Wrench className="w-4 h-4 inline-block mr-1" /> Ассортимент товаров у {tavernSettings.merchantName || "Сидоровича"}</span>
+                      <span className="text-[9px] text-gray-500">БД ТОРГОВЛИ</span>
                     </h5>
                     
                     <div className="space-y-2.5 text-xs font-mono">
@@ -1399,7 +2688,7 @@ export const Tavern: React.FC<TavernProps> = ({
 
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="block text-gray-400 mb-1">Цена (RU):</label>
+                          <label className="block text-gray-400 mb-1">Цена (в кр.):</label>
                           <input
                             type="number"
                             placeholder="150"
@@ -1460,7 +2749,7 @@ export const Tavern: React.FC<TavernProps> = ({
                           }}
                           className="flex-1 bg-amber-600 hover:bg-amber-500 text-gray-950 font-bold py-2.5 rounded uppercase tracking-wider cursor-pointer"
                         >
-                          ➕ Добавить на прилавок
+                          <Plus className='w-3.5 h-3.5 inline mr-1 text-gray-950 stroke-[3]' /> Добавить на прилавок
                         </button>
                         
                         <button
@@ -1480,7 +2769,7 @@ export const Tavern: React.FC<TavernProps> = ({
                           className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-2 rounded font-bold uppercase cursor-pointer"
                           title="Выдать сразу в походный рюкзак отряда"
                         >
-                          В рюкзак 🎒
+                          В рюкзак <Briefcase className='w-3.5 h-3.5 inline ml-1 text-gray-400' />
                         </button>
                       </div>
                     </div>
@@ -1492,7 +2781,7 @@ export const Tavern: React.FC<TavernProps> = ({
                         {shopItems.map((item: any) => (
                           <div key={item.id} className="flex justify-between items-center bg-gray-950 px-2 py-1.5 rounded border border-gray-900 text-[11px] font-mono text-gray-300">
                             <div>
-                              <span className="font-bold">{item.name}</span> • <span className="text-amber-500">{item.price} RU</span>
+                              <span className="font-bold">{item.name}</span> • <span className="text-amber-500">{formatCredits(item.price)}</span>
                             </div>
                             <button
                               onClick={() => {
@@ -1518,7 +2807,7 @@ export const Tavern: React.FC<TavernProps> = ({
                   {/* GM Column 2: Total Player Database Control */}
                   <div className="bg-gray-950 p-4 rounded border border-gray-800 space-y-4">
                     <h5 className="font-bold font-mono text-xs text-amber-500 uppercase pb-1 border-b border-gray-850">
-                      🛡️ Профайлы & База Данных КПК Сталкеров
+                      Профайлы & База Данных КПК Сталкеров
                     </h5>
 
                     <div className="space-y-3.5 text-xs font-mono">
@@ -1529,8 +2818,10 @@ export const Tavern: React.FC<TavernProps> = ({
                           onChange={(e) => {
                             const val = e.target.value;
                             setGmSelectedPlayerId(val);
-                            if (playerDb[val]) {
+                            if (playerDb[val] && playerDb[val].balance !== undefined && playerDb[val].balance !== null) {
                               setGmPlayerBalanceInput(playerDb[val].balance.toString());
+                            } else {
+                              setGmPlayerBalanceInput("0");
                             }
                           }}
                           className="w-full bg-gray-900 border border-gray-800 rounded p-2 text-xs font-mono text-amber-400 font-bold outline-none focus:border-amber-900"
@@ -1538,7 +2829,7 @@ export const Tavern: React.FC<TavernProps> = ({
                           <option value="">-- Выберите игрока --</option>
                           {Object.keys(playerDb).map((pId) => (
                             <option key={pId} value={pId}>
-                              {playerDb[pId]?.userName || pId} (Баланс: {playerDb[pId]?.balance || 0} RU)
+                              {playerDb[pId]?.userName || pId} (Баланс: {formatCredits(playerDb[pId]?.balance || 0)})
                             </option>
                           ))}
                         </select>
@@ -1550,7 +2841,7 @@ export const Tavern: React.FC<TavernProps> = ({
                           {/* Part A: Set absolute balance */}
                           <div className="grid grid-cols-3 gap-2 items-end">
                             <div className="col-span-2">
-                              <label className="block text-gray-550 mb-1 text-[10px]">Баланс на счете RU:</label>
+                              <label className="block text-gray-550 mb-1 text-[10px]">Баланс на счете (в кредитах):</label>
                               <input
                                 type="number"
                                 value={gmPlayerBalanceInput}
@@ -1565,7 +2856,7 @@ export const Tavern: React.FC<TavernProps> = ({
                                     type: "GM_SET_PLAYER_BALANCE",
                                     payload: { targetPlayerId: gmSelectedPlayerId, balance: gmPlayerBalanceInput }
                                   }));
-                                  setPdaAlert({ text: `Баланс игрока изменен на ${gmPlayerBalanceInput} RU`, type: "success" });
+                                  setPdaAlert({ text: `Баланс игрока изменен на ${formatCredits(parseInt(gmPlayerBalanceInput) || 0)}`, type: "success" });
                                   setTimeout(() => setPdaAlert(null), 2500);
                                 }
                               }}
@@ -1634,7 +2925,7 @@ export const Tavern: React.FC<TavernProps> = ({
                               }}
                               className="w-full bg-red-950 hover:bg-red-900 text-red-300 hover:text-white border border-red-900 py-2 rounded text-center font-bold text-[10px] uppercase tracking-wider cursor-pointer transition-colors"
                             >
-                              ⚠️ Полный Сброс Профиля Сталкера
+                              <CustomWarning />️ Полный Сброс Профиля Сталкера
                             </button>
                           </div>
 
@@ -1664,7 +2955,7 @@ export const Tavern: React.FC<TavernProps> = ({
             <div className="space-y-6">
               {!tavernSettings.enabledGames.pazaak && (
                 <div className="bg-red-950/40 border border-red-900 text-red-400 text-[11px] font-mono px-3 py-2 rounded text-center uppercase font-bold tracking-wider animate-pulse">
-                  🛡️ ВНИМАНИЕ КУРАТОРА: Паазак временно ОТКЛЮЧЕН для сталкеров!
+                  ВНИМАНИЕ КУРАТОРА: Паазак временно ОТКЛЮЧЕН для сталкеров!
                 </div>
               )}
             
@@ -1678,7 +2969,7 @@ export const Tavern: React.FC<TavernProps> = ({
                     <span className="text-gray-500">Дуэль:</span> <span className="text-emerald-400 font-bold">{userActiveLobby.creatorName}</span> против <span className="text-emerald-400 font-bold">{userActiveLobby.opponentName || "Ожидание..."}</span>
                   </div>
                   <div className="text-emerald-400 bg-emerald-950/40 rounded px-2.5 py-1 border border-emerald-900/40 font-bold animate-pulse">
-                    СТАВКА: {userActiveLobby.bet} RU
+                    СТАВКА: {formatCredits(userActiveLobby.bet)}
                   </div>
                 </div>
 
@@ -1875,7 +3166,7 @@ export const Tavern: React.FC<TavernProps> = ({
                     onClick={() => handlePazaakConcede(userActiveLobby.id)}
                     className="bg-red-950/80 hover:bg-red-900 text-red-400 border border-red-800/50 px-4 py-2 text-xs font-mono font-bold rounded uppercase cursor-pointer"
                   >
-                    Сдаться / Сбежать 🚪
+                    Сдаться / Сбежать <Flag className='w-3.5 h-3.5 inline ml-1 text-red-400' />
                   </button>
 
                   {userActiveLobby.turn === userId && (
@@ -1890,7 +3181,7 @@ export const Tavern: React.FC<TavernProps> = ({
                         onClick={() => handlePazaakEndTurn(userActiveLobby.id)}
                         className="bg-emerald-600 hover:bg-emerald-500 text-gray-950 px-5 py-2 text-xs font-mono font-bold rounded uppercase cursor-pointer shadow-md"
                       >
-                        Завершить Ход (PASS) ➡️
+                        Завершить Ход (PASS) <ChevronRight className='w-3.5 h-3.5 inline ml-1 text-gray-950' />
                       </button>
                     </div>
                   )}
@@ -1937,7 +3228,7 @@ export const Tavern: React.FC<TavernProps> = ({
                     </div>
 
                     <div>
-                      <div className="text-[10px] font-mono text-gray-500 uppercase tracking-widest mb-1.5">Размер Ставки встречи (RU)</div>
+                      <div className="text-[10px] font-mono text-gray-500 uppercase tracking-widest mb-1.5">Размер Ставки встречи (в кредитах)</div>
                       <input
                         type="number"
                         min="50"
@@ -1978,7 +3269,7 @@ export const Tavern: React.FC<TavernProps> = ({
                                 <div className="font-mono text-[10px] text-gray-550 mt-1">Лобби: {lobby.id}</div>
                               </div>
                               <div className="flex items-center gap-3">
-                                <span className="text-emerald-400 font-mono font-semibold">{lobby.bet} RU</span>
+                                <span className="text-emerald-400 font-mono font-semibold">{formatCredits(lobby.bet)}</span>
                                 <button
                                   onClick={() => handleJoinPazaakMatch(lobby.id)}
                                   className="bg-emerald-950/60 hover:bg-emerald-600 text-emerald-400 hover:text-emerald-950 border border-emerald-900 px-3 py-1.5 rounded font-mono text-[11px] cursor-pointer"
@@ -2020,7 +3311,7 @@ export const Tavern: React.FC<TavernProps> = ({
 
                   <div className="border border-dashed border-gray-800 p-3 bg-gray-900/40 rounded">
                     <div className="text-[10px] text-purple-400 font-mono uppercase tracking-widest mb-2 font-bold select-none">
-                      Приобрести Booster Pack за 300 RU
+                      Приобрести Booster Pack за 300 кредитов
                     </div>
                     <p className="text-gray-450 text-[11px] leading-snug mb-3">
                       Покупайте случайные премиум модификаторы: флип-знаки `+/-2`, множители `D` (Double), победы на ничьей `T` или триггеры!
@@ -2030,7 +3321,7 @@ export const Tavern: React.FC<TavernProps> = ({
                       onClick={handleBuyBooster}
                       className="bg-purple-900/35 hover:bg-purple-600 text-purple-300 hover:text-purple-950 border border-purple-800 hover:border-purple-600 py-2 w-full text-xs font-mono font-bold uppercase cursor-pointer rounded transition-all"
                     >
-                      {isOpeningBooster ? "Покупаем бустер..." : "Купить Booster (300 RU)"}
+                      {isOpeningBooster ? "Покупаем бустер..." : "Купить Booster (300 кредитов)"}
                     </button>
 
                     {/* Reveal opened booster cards with visual satisfaction */}
@@ -2077,9 +3368,7 @@ export const Tavern: React.FC<TavernProps> = ({
                             <span className="text-[10px] leading-tight text-white">{card}</span>
                             {/* Marker badge */}
                             {isPicked && (
-                              <span className="absolute -top-1 -right-1 bg-purple-500 text-purple-950 rounded-full w-4 h-4 text-[9px] font-bold flex items-center justify-center border border-purple-300">
-                                ✓
-                              </span>
+                              <span className="absolute -top-1 -right-1 bg-purple-500 text-purple-950 rounded-full w-4 h-4 flex items-center justify-center border border-purple-300"><UserCheck className="w-2.5 h-2.5 text-purple-950" /></span>
                             )}
                           </button>
                         );
@@ -2111,7 +3400,7 @@ export const Tavern: React.FC<TavernProps> = ({
               <div className="lg:col-span-2 space-y-6">
                 {!tavernSettings.enabledGames.dice && (
                   <div className="bg-red-950/40 border border-red-900 text-red-400 text-[11px] font-mono px-3 py-2 rounded text-center uppercase font-bold tracking-wider animate-pulse">
-                    🛡️ ВНИМАНИЕ КУРАТОРА: Покер на костях временно ОТКЛЮЧЕН для сталкеров!
+                    ВНИМАНИЕ КУРАТОРА: Покер на костях временно ОТКЛЮЧЕН для сталкеров!
                   </div>
                 )}
               
@@ -2121,14 +3410,14 @@ export const Tavern: React.FC<TavernProps> = ({
                     Сталкерский Покер на Костях
                   </h4>
                   <p className="text-gray-400 text-xs leading-relaxed font-mono">
-                    Правила: Вы делаете ставку, система кидает 5 костей. Вы можете заблокировать (LOCK 🔒) любые из понравившихся костей и сделать ОДИН переброс оставшихся. Бармен также бросает и блокирует кости на своей стороне. Побеждает старшая комбинация poker-рейтинга!
+                    Правила: Вы делаете ставку, система кидает 5 костей. Вы можете заблокировать (LOCK <Lock className='inline w-3 h-3 text-sky-400 mb-0.5' />) любые из понравившихся костей и сделать ОДИН переброс оставшихся. Бармен также бросает и блокирует кости на своей стороне. Побеждает старшая комбинация poker-рейтинга!
                   </p>
 
                   {!diceState.active ? (
                     // Setup Bet Panel
                     <div className="bg-gray-900 p-3 rounded border border-gray-850 space-y-4">
                       <div>
-                        <div className="text-[10px] font-mono text-gray-500 uppercase tracking-widest mb-1.5">Размер Ставки (RU)</div>
+                        <div className="text-[10px] font-mono text-gray-500 uppercase tracking-widest mb-1.5">Размер Ставки (в кредитах)</div>
                         <input
                           type="number"
                           min="50"
@@ -2143,7 +3432,7 @@ export const Tavern: React.FC<TavernProps> = ({
                         onClick={handlePlayDice}
                         className="w-full bg-sky-600 hover:bg-sky-500 text-gray-950 font-mono text-xs font-extrabold py-3.5 uppercase tracking-wider rounded cursor-pointer transition shadows"
                       >
-                        🎲 Бросить Вызов Бармену (AI)
+                        <Dices className='w-4 h-4 inline mr-1 text-sky-400' /> Бросить Вызов Бармену (AI)
                       </button>
                     </div>
                   ) : (
@@ -2210,9 +3499,7 @@ export const Tavern: React.FC<TavernProps> = ({
                                 <span>{val}</span>
                                 {/* Small padlock overlay indicators */}
                                 {isLocked && (
-                                  <span className="absolute -top-1 -right-1 bg-sky-500 rounded-full w-4.5 h-4.5 flex items-center justify-center border border-sky-400 text-[8px] text-gray-950 select-none font-bold">
-                                    🔒
-                                  </span>
+                                  <span className="absolute -top-1 -right-1 bg-sky-500 rounded-full w-4.5 h-4.5 flex items-center justify-center border border-sky-400 text-gray-950 select-none font-bold"><Lock className="w-2.5 h-2.5 text-gray-950 stroke-[3]" /></span>
                                 )}
                               </button>
                             );
@@ -2221,7 +3508,7 @@ export const Tavern: React.FC<TavernProps> = ({
 
                         {(diceState.rerollStep === 1 || diceState.rerollStep === 2) && (
                           <div className="text-center font-mono text-[10px] text-gray-400 mb-4 select-none uppercase tracking-wider">
-                            Нажмите на кубики, которые хотите ОСТАВИТЬ (LOCK 🔒), затем кликните переброс ниже!
+                            Нажмите на кубики, которые хотите ОСТАВИТЬ (LOCK <Lock className='inline w-3 h-3 text-sky-400 mb-0.5' />), затем кликните переброс ниже!
                           </div>
                         )}
 
@@ -2231,7 +3518,7 @@ export const Tavern: React.FC<TavernProps> = ({
                             onClick={handleDiceReroll}
                             className="w-full bg-sky-600 hover:bg-sky-500 text-gray-950 font-mono text-xs font-bold py-2.5 uppercase tracking-wider rounded cursor-pointer animate-pulse"
                           >
-                            🔄 СДЕЛАТЬ ПЕРЕБРОС КУБОВ (ХОД {diceState.rerollStep + 1} ИЗ 3)
+                            <RefreshCw className="w-3.5 h-3.5 inline-block mr-1" /> СДЕЛАТЬ ПЕРЕБРОС КУБОВ (ХОД {diceState.rerollStep + 1} ИЗ 3)
                           </button>
                         ) : (
                           <div className="p-3.5 bg-gray-950 rounded border border-gray-800 font-mono text-center text-xs space-y-2 text-gray-200">
@@ -2254,21 +3541,21 @@ export const Tavern: React.FC<TavernProps> = ({
               {/* Right Column: Cheat Sheet / Табель комбинаций */}
               <div className="bg-gray-950 p-4 rounded border border-gray-800 space-y-4 font-mono text-xs text-gray-300">
                 <h5 className="font-bold text-sky-400 border-b border-gray-850 pb-2 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                  📊 ПОКЕРНЫЙ ТАБЕЛЬ РАНГОВ
+                  <Award className='w-4 h-4 text-sky-400' /> ПОКЕРНЫЙ ТАБЕЛЬ РАНГОВ
                 </h5>
                 <p className="text-[10px] text-gray-500 leading-normal">
                   Покерные комбинации от сильнейшей к слабейшей. Сила руки рассчитывается автоматически по старшинству ранга, а при равных рангах — по весу.
                 </p>
                 <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
                   {[
-                    { rank: 8, name: "ПЯТЕРКА (ПОКЕР) 🌌", weight: "Вес: 5000+", desc: "Все 5 костей одинаковые", pattern: "5 • 5 • 5 • 5 • 5" },
-                    { rank: 7, name: "КАРЕ ⚡", weight: "Вес: 4000+", desc: "4 кости одного номинала", pattern: "4 • 4 • 4 • 4 • ?" },
-                    { rank: 6, name: "ФУЛЛ-ХАУС 🏠", weight: "Вес: 3000+", desc: "Три кости одного + пара другого", pattern: "3 • 3 • 3 • 6 • 6" },
-                    { rank: 5, name: "СТРИТ 📏", weight: "Вес: 2000+", desc: "Последовательная цепочка костей", pattern: "1-2-3-4-5 или 2-3-4-5-6" },
-                    { rank: 4, name: "ТРОЙКА 🕒", weight: "Вес: 1000+", desc: "Три кости одинакового номинала", pattern: "2 • 2 • 2 • ? • ?" },
-                    { rank: 3, name: "ДВЕ ПАРЫ 👥", weight: "Вес: 500+", desc: "Два разных дуплета одинаковых", pattern: "5 • 5 • 1 • 1 • ?" },
-                    { rank: 2, name: "ПАРА 🤝", weight: "Вес: 200+", desc: "Один дуплет одинаковых костей", pattern: "4 • 4 • ? • ? • ?" },
-                    { rank: 1, name: "СТАРШАЯ КОСТЬ 🎲", weight: "Сумма костей", desc: "При отсутствии совпадений", pattern: "Суммарный номинал" }
+                    { rank: 8, name: "ПЯТЕРКА (ПОКЕР)", weight: "Вес: 5000+", desc: "Все 5 костей одинаковые", pattern: "5 • 5 • 5 • 5 • 5" },
+                    { rank: 7, name: "КАРЕ", weight: "Вес: 4000+", desc: "4 кости одного номинала", pattern: "4 • 4 • 4 • 4 • ?" },
+                    { rank: 6, name: "ФУЛЛ-ХАУС", weight: "Вес: 3000+", desc: "Три кости одного + пара другого", pattern: "3 • 3 • 3 • 6 • 6" },
+                    { rank: 5, name: "СТРИТ", weight: "Вес: 2000+", desc: "Последовательная цепочка костей", pattern: "1-2-3-4-5 или 2-3-4-5-6" },
+                    { rank: 4, name: "ТРОЙКА", weight: "Вес: 1000+", desc: "Три кости одинакового номинала", pattern: "2 • 2 • 2 • ? • ?" },
+                    { rank: 3, name: "ДВЕ ПАРЫ", weight: "Вес: 500+", desc: "Два разных дуплета одинаковых", pattern: "5 • 5 • 1 • 1 • ?" },
+                    { rank: 2, name: "ПАРА", weight: "Вес: 200+", desc: "Один дуплет одинаковых костей", pattern: "4 • 4 • ? • ? • ?" },
+                    { rank: 1, name: "СТАРШАЯ КОСТЬ", weight: "Сумма костей", desc: "При отсутствии совпадений", pattern: "Суммарный номинал" }
                   ].map((comb) => (
                     <div key={comb.rank} className="p-2 bg-gray-900 border border-gray-850 rounded hover:border-sky-900/60 transition-colors col-span-1">
                       <div className="flex justify-between items-center text-[11px] font-bold">
@@ -2302,7 +3589,7 @@ export const Tavern: React.FC<TavernProps> = ({
             <div className="space-y-6">
               {!tavernSettings.enabledGames.races && (
                 <div className="bg-red-950/40 border border-red-900 text-red-400 text-[11px] font-mono px-3 py-2 rounded text-center uppercase font-bold tracking-wider animate-pulse">
-                  🛡️ ВНИМАНИЕ КУРАТОРА: Тотализатор скачек временно ОТКЛЮЧЕН для сталкеров!
+                  ВНИМАНИЕ КУРАТОРА: Тотализатор скачек временно ОТКЛЮЧЕН для сталкеров!
                 </div>
               )}
             
@@ -2348,8 +3635,8 @@ export const Tavern: React.FC<TavernProps> = ({
                             transition={{ type: "spring", stiffness: 80, damping: 12 }}
                             className="absolute bg-gray-900 border border-gray-850 px-2 py-0.5 rounded shadow z-20 text-xs font-mono font-bold flex items-center gap-1"
                           >
-                            <span>🏃</span>
-                            {activeRace.winner === rider.name && <span className="text-yellow-400">👑</span>}
+                            <CustomRun className='w-5 h-5 text-gray-400' />
+                            {activeRace.winner === rider.name && <CustomCrown />}
                           </motion.div>
                         </div>
                       </div>
@@ -2377,7 +3664,7 @@ export const Tavern: React.FC<TavernProps> = ({
                     </div>
 
                     <div>
-                      <div className="text-[10px] font-mono text-gray-500 uppercase tracking-widest mb-1.5 font-bold">Размер Ставки (RU)</div>
+                      <div className="text-[10px] font-mono text-gray-500 uppercase tracking-widest mb-1.5 font-bold">Размер Ставки (в кредитах)</div>
                       <input
                         type="number"
                         min="50"
@@ -2394,7 +3681,7 @@ export const Tavern: React.FC<TavernProps> = ({
                         onClick={handlePlaceRaceBet}
                         className="w-full bg-yellow-600 hover:bg-yellow-500 text-gray-950 py-2 rounded font-mono text-xs font-extrabold uppercase tracking-wider cursor-pointer"
                       >
-                        Зарядить Трату 📝
+                        <div className="flex items-center justify-center gap-1.5"><CustomNote /> Зарядить Трату</div>
                       </button>
                     </div>
                   </div>
@@ -2410,7 +3697,7 @@ export const Tavern: React.FC<TavernProps> = ({
                   <div className="h-44 overflow-y-auto font-mono text-[11px] text-gray-400 space-y-1.5">
                     {activeRace.log.slice().reverse().map((line: string, idx: number) => (
                       <div key={idx} className="border-b border-gray-950 pb-1">
-                        👉 {line}
+                        {line}
                       </div>
                     ))}
                     {activeRace.log.length === 0 && (
@@ -2452,7 +3739,7 @@ export const Tavern: React.FC<TavernProps> = ({
                         onClick={handleGMStartRace}
                         className="bg-emerald-600 hover:bg-emerald-500 text-gray-950 font-mono font-bold text-xs py-2 rounded uppercase cursor-pointer text-center"
                       >
-                        Запустить Заезд 🏁
+                        <div className="flex items-center gap-1.5"><CustomRun /> Запустить Заезд</div>
                       </button>
                       <button
                         onClick={handleGMResetRace}
@@ -2486,7 +3773,7 @@ export const Tavern: React.FC<TavernProps> = ({
             <div className="space-y-6">
               {!tavernSettings.enabledGames.slots && (
                 <div className="bg-red-950/40 border border-red-900 text-red-400 text-[11px] font-mono px-3 py-2 rounded text-center uppercase font-bold tracking-wider animate-pulse">
-                  🛡️ ВНИМАНИЕ КУРАТОРА: Реактор-Слот в данный момент ОТКЛЮЧЕН для обычных посетителей!
+                  ВНИМАНИЕ КУРАТОРА: Реактор-Слот в данный момент ОТКЛЮЧЕН для обычных посетителей!
                 </div>
               )}
 
@@ -2509,7 +3796,20 @@ export const Tavern: React.FC<TavernProps> = ({
                   <div className="bg-gray-900 border border-purple-950 p-6 rounded-lg my-4 flex justify-around items-center gap-4 relative">
                     <div className="absolute inset-x-0 h-0.5 bg-purple-500/30 top-1/2 -translate-y-1/2 pointer-events-none" />
                     
-                    {slotsState.reels.map((symbol, idx) => (
+                    {slotsState.reels.map((symbol, idx) => {
+                      const renderSlotSymbol = (sym: string) => {
+                        switch(sym) {
+                          case "⚙️": return <Settings className="w-12 h-12 text-stone-400" />;
+                          case "🥫": return <Cylinder className="w-12 h-12 text-sky-400" />;
+                          case "🍾": return <Wine className="w-12 h-12 text-amber-500" />;
+                          case "💎": return <Gem className="w-12 h-12 text-emerald-400" />;
+                          case "☢️": return <Activity className="w-12 h-12 text-purple-400" />;
+                          case "💀": return <Skull className="w-12 h-12 text-rose-500" />;
+                          case "🎲": return <Dices className="w-12 h-12 text-gray-500" />;
+                          default: return sym;
+                        }
+                      };
+                      return (
                       <div 
                         key={idx} 
                         className={`w-20 h-24 sm:w-24 sm:h-28 rounded-lg bg-gray-950 border-2 ${
@@ -2517,9 +3817,11 @@ export const Tavern: React.FC<TavernProps> = ({
                         } flex items-center justify-center text-4xl sm:text-5xl shadow-inner shadow-black transition-all`}
                         style={{ animationDelay: `${idx * 100}ms` }}
                       >
-                        <span className={slotsState.spinning ? 'filter blur-[1px]' : ''}>{symbol}</span>
+                        <span className={slotsState.spinning ? 'filter blur-[1px]' : ''}>
+                          {renderSlotSymbol(symbol)}
+                        </span>
                       </div>
-                    ))}
+                    )})}
                   </div>
 
                   {/* Operational Messages */}
@@ -2532,7 +3834,7 @@ export const Tavern: React.FC<TavernProps> = ({
                     ) : slotsState.winAmount !== undefined ? (
                       <div className="font-mono text-xs text-center space-y-1">
                         <div className={`font-bold ${slotsState.winAmount > 0 ? "text-emerald-400 text-sm animate-pulse" : "text-red-400"}`}>
-                          {slotsState.winAmount > 0 ? `🔥 ВЫИГРЫШ: +${slotsState.winAmount} RU!` : "СТЕРЖНИ НЕ СОВПАЛИ!"}
+                          {slotsState.winAmount > 0 ? `ВЫИГРЫШ: +${formatCredits(slotsState.winAmount)}!` : "СТЕРЖНИ НЕ СОВПАЛИ!"}
                         </div>
                         <div className="text-[10px] text-gray-400 uppercase tracking-wide">{slotsState.message}</div>
                       </div>
@@ -2544,7 +3846,7 @@ export const Tavern: React.FC<TavernProps> = ({
                   {/* Controls HUD */}
                   <div className="mt-6 pt-5 border-t border-purple-950 flex flex-wrap justify-between items-center gap-4">
                     <div className="space-y-1.5">
-                      <div className="text-[9px] font-mono text-gray-500 uppercase tracking-widest leading-none">Ставка Сталкера (RU)</div>
+                      <div className="text-[9px] font-mono text-gray-500 uppercase tracking-widest leading-none">Ставка Сталкера (в кредитах)</div>
                       <div className="flex gap-1.5 select-none font-mono">
                         {[50, 100, 250, 500, 1000].map((amt) => (
                           <button
@@ -2572,7 +3874,7 @@ export const Tavern: React.FC<TavernProps> = ({
                           : "bg-purple-600 hover:bg-purple-500 text-gray-950 border-purple-400 font-black animate-pulse"
                       }`}
                     >
-                      🎰 ПУСК РЕАКТОРА
+                      <div className="flex items-center justify-center gap-1.5">ПУСК РЕАКТОРА</div>
                     </button>
                   </div>
 
@@ -2580,31 +3882,58 @@ export const Tavern: React.FC<TavernProps> = ({
 
                 {/* Slots Payout Matrix */}
                 <div className="bg-gray-950 p-4 rounded-lg border border-gray-850 space-y-4">
-                  <h5 className="text-purple-400 font-bold font-mono text-xs uppercase tracking-wider border-b border-purple-950 pb-2">🎰 ТАБЛИЦА СОВПАДЕНИЙ РЕАКТОРА</h5>
+                  <div className="flex items-center gap-1.5 text-purple-400 font-bold font-mono text-xs uppercase tracking-wider border-b border-purple-950 pb-2">
+                    <Gamepad2 className="w-4 h-4" />
+                    <span>ТАБЛИЦА СОВПАДЕНИЙ РЕАКТОРА</span>
+                  </div>
                   <div className="space-y-2 text-[10px] font-mono text-gray-400 leading-none">
                     <div className="flex justify-between items-center p-2 rounded bg-gray-900 border border-purple-950/40">
-                      <span className="text-xl">☢️ ☢️ ☢️</span>
+                      <span className="flex gap-1 text-purple-400">
+                        <Activity className="w-5 h-5"/>
+                        <Activity className="w-5 h-5"/>
+                        <Activity className="w-5 h-5"/>
+                      </span>
                       <span className="text-purple-400 font-extrabold bg-purple-950/50 px-2 py-0.5 rounded border border-purple-900">x150 СТАВКА (Реактор Лок)</span>
                     </div>
                     <div className="flex justify-between items-center p-2 rounded bg-gray-900/60">
-                      <span className="text-xl">💎 💎 💎</span>
+                      <span className="flex gap-1 text-emerald-400">
+                        <Gem className="w-5 h-5"/>
+                        <Gem className="w-5 h-5"/>
+                        <Gem className="w-5 h-5"/>
+                      </span>
                       <span className="text-emerald-400 font-extrabold bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-900">x60 СТАВКА (Артефакты)</span>
                     </div>
                     <div className="flex justify-between items-center p-2 rounded bg-gray-900/60">
-                      <span className="text-xl">🍾 🍾 🍾</span>
+                      <span className="flex gap-1 text-amber-500">
+                        <Wine className="w-5 h-5"/>
+                        <Wine className="w-5 h-5"/>
+                        <Wine className="w-5 h-5"/>
+                      </span>
                       <span className="text-amber-400 font-extrabold bg-amber-950/50 px-2 py-0.5 rounded border border-amber-900">x30 СТАВКА (Казаки Водка)</span>
                     </div>
                     <div className="flex justify-between items-center p-2 rounded bg-gray-900/60">
-                      <span className="text-xl">🥫 🥫 🥫</span>
+                      <span className="flex gap-1 text-orange-600">
+                        <Cylinder className="w-5 h-5"/>
+                        <Cylinder className="w-5 h-5"/>
+                        <Cylinder className="w-5 h-5"/>
+                      </span>
                       <span className="text-sky-400 font-bold bg-sky-950/50 px-2 py-0.5 rounded border border-sky-900">x15 СТАВКА (Тушонка)</span>
                     </div>
                     <div className="flex justify-between items-center p-2 rounded bg-gray-900/60">
-                      <span className="text-xl">⚙️ ⚙️ ⚙️</span>
-                      <span className="text-gray-300 font-bold bg-gray-950 px-2 py-0.5 rounded border border-gray-800">x8 СТАВКА (Болты)</span>
+                      <span className="flex gap-1 text-stone-400">
+                        <Settings className="w-5 h-5"/>
+                        <Settings className="w-5 h-5"/>
+                        <Settings className="w-5 h-5"/>
+                      </span>
+                      <span className="text-gray-300 font-bold bg-gray-950 px-2 py-0.5 rounded border border-gray-800">x8 СТАВКА (Детали)</span>
                     </div>
                     <div className="flex justify-between items-center p-2 rounded bg-gray-900 border border-rose-950/20">
-                      <div className="flex items-center gap-1">
-                        <span className="text-xl">💀 💀 💀</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="flex gap-1 text-rose-500">
+                          <Skull className="w-5 h-5"/>
+                          <Skull className="w-5 h-5"/>
+                          <Skull className="w-5 h-5"/>
+                        </span>
                         <span className="text-rose-500 font-semibold">[ОПАСНОСТЬ!]</span>
                       </div>
                       <span className="text-rose-400 font-bold bg-rose-950/50 px-2 py-0.5 rounded border border-rose-900">x0 (ВЗРЫВ СИСТЕМЫ!)</span>
@@ -2615,7 +3944,7 @@ export const Tavern: React.FC<TavernProps> = ({
                     </div>
                   </div>
                   <div className="p-3 bg-purple-950/10 border border-purple-900/40 rounded text-[9px] font-mono text-purple-400 leading-normal">
-                    💡 Ставки списываются с Вашего баланса КПК в режиме реального времени. Логи тиражируются в общую систему уведомлений бара. Администрация не возвращает рубли в случае аварии терминала!
+                    Ставки списываются с Вашего баланса КПК в режиме реального времени. Логи тиражируются в общую систему уведомлений бара. Администрация не возвращает рубли в случае аварии терминала!
                   </div>
                 </div>
 
@@ -2638,7 +3967,7 @@ export const Tavern: React.FC<TavernProps> = ({
             <div className="space-y-6">
               {!tavernSettings.enabledGames.roulette && (
                 <div className="bg-red-950/40 border border-red-905 text-red-400 text-[11px] font-mono px-3 py-2 rounded text-center uppercase font-bold tracking-wider animate-pulse">
-                  🛡️ ВНИМАНИЕ КУРАТОРА: Радар-Рулетка в данный момент ОТКЛЮЧЕНА для свободных игроков!
+                  ВНИМАНИЕ КУРАТОРА: Радар-Рулетка в данный момент ОТКЛЮЧЕНА для свободных игроков!
                 </div>
               )}
 
@@ -2705,7 +4034,7 @@ export const Tavern: React.FC<TavernProps> = ({
                           </div>
                         ) : (
                           <div className="text-center">
-                            <span className="text-2xl">📡</span>
+                            <span className="text-2xl"><CustomTarget className='w-6 h-6 text-sky-400' /></span>
                             <span className="block text-[9px] text-gray-500 uppercase tracking-widest mt-1">РАДАР ГОТОВ</span>
                           </div>
                         )}
@@ -2723,7 +4052,7 @@ export const Tavern: React.FC<TavernProps> = ({
                     ) : rouletteState.winAmount !== undefined ? (
                       <div className="font-mono text-xs text-center space-y-1">
                         <div className={`font-bold ${rouletteState.winAmount > 0 ? "text-emerald-400 text-sm animate-pulse" : "text-red-400"}`}>
-                          {rouletteState.winAmount > 0 ? `💰 СИГНАЛ СОВПАЛ: +${rouletteState.winAmount} RU!` : "СТАВКА НЕ СЫГРАЛА!"}
+                          {rouletteState.winAmount > 0 ? `СИГНАЛ СОВПАЛ: +${formatCredits(rouletteState.winAmount)}!` : "СТАВКА НЕ СЫГРАЛА!"}
                         </div>
                         <div className="text-[10px] text-gray-400 uppercase tracking-wide">{rouletteState.message}</div>
                       </div>
@@ -2843,7 +4172,7 @@ export const Tavern: React.FC<TavernProps> = ({
 
                       {/* 3. BET SIZE SELECTOR AND SPIN TRIGGER */}
                       <div className="space-y-1.5 font-mono text-xs">
-                        <label className="block text-gray-500 uppercase text-[9px] tracking-widest leading-none">Ставка Сталкера (RU)</label>
+                        <label className="block text-gray-500 uppercase text-[9px] tracking-widest leading-none">Ставка Сталкера (в кредитах)</label>
                         <div className="flex gap-1.5 select-none font-mono">
                           {[50, 100, 250, 500, 1000].map((amt) => (
                             <button
@@ -2873,7 +4202,7 @@ export const Tavern: React.FC<TavernProps> = ({
                           : "bg-red-600 hover:bg-red-500 text-white border-red-400 tracking-widest font-black"
                       }`}
                     >
-                      📡 ЗАПУСТИТЬ ОПТИМАЛЬНОЕ СКАНИРОВАНИЕ РАДАРА
+                      <div className="flex justify-center items-center gap-1.5">ЗАПУСТИТЬ ОПТИМАЛЬНОЕ СКАНИРОВАНИЕ РАДАРА</div>
                     </button>
 
                   </div>
@@ -2882,7 +4211,7 @@ export const Tavern: React.FC<TavernProps> = ({
 
                 {/* Roulette rules sidebar */}
                 <div className="bg-gray-950 p-4 rounded-lg border border-gray-850 space-y-4">
-                  <h5 className="text-red-400 font-bold font-mono text-xs uppercase tracking-wider border-b border-red-950 pb-2">🎯 ТАРИФЫ ЧАСТОТ ДЕТЕКТОРА</h5>
+                  <h5 className="text-red-400 font-bold font-mono text-xs uppercase tracking-wider border-b border-red-950 pb-2">ТАРИФЫ ЧАСТОТ ДЕТЕКТОРА</h5>
                   <div className="space-y-2.5 text-[10px] font-mono text-gray-400 leading-normal">
                     <p>
                       Система рулетки базируется на случайной модуляции КПК:
@@ -2900,7 +4229,7 @@ export const Tavern: React.FC<TavernProps> = ({
                       <p>При выпадении Зеро (0) все ставки на четность сгорают в пользу таверны. Победное толкование составляет <strong className="text-emerald-400">2 к 1</strong>.</p>
                     </div>
                     <div className="p-3 bg-red-950/10 border border-red-900/30 rounded text-[9px] text-red-400 leading-normal">
-                      ⚠ Любые программные подделки импульсов рулетки наказываются вызовом на арену!
+                      <CustomWarning /> Любые программные подделки импульсов рулетки наказываются вызовом на арену!
                     </div>
                   </div>
                 </div>
@@ -2924,7 +4253,7 @@ export const Tavern: React.FC<TavernProps> = ({
             <div className="space-y-6">
               {!tavernSettings.enabledGames.shooting && (
                 <div className="bg-red-950/40 border border-red-900 text-red-400 text-[11px] font-mono px-3 py-2 rounded text-center uppercase font-bold tracking-wider animate-pulse">
-                  🛡️ ВНИМАНИЕ КУРАТОРА: КПК-Тир закрыт и заблокирован для рядовых сталкеров!
+                  ВНИМАНИЕ КУРАТОРА: КПК-Тир закрыт и заблокирован для рядовых сталкеров!
                 </div>
               )}
 
@@ -2956,13 +4285,13 @@ export const Tavern: React.FC<TavernProps> = ({
                         }`}
                       >
                         <div>
-                          <div className="font-extrabold text-orange-400 text-sm">🔫 Пистолет ПМ</div>
+                          <div className="font-extrabold text-orange-400 text-sm">Пистолет ПМ</div>
                           <p className="text-[10px] text-gray-500 mt-1 capitalize leading-relaxed">Надежная классика, слабый подброс при отдаче.</p>
                         </div>
                         <div className="text-[10px] space-y-0.5 text-gray-400 border-t border-gray-800 pt-2 shrink-0">
                           <div>🪨 Емкость: <span className="text-white font-bold">8 патронов</span></div>
-                          <div>🔄 Зарядка: <span className="text-amber-500">0.9 сек</span></div>
-                          <div>🎖️ Множитель: <span className="text-emerald-400">1.0x</span></div>
+                          <div><RefreshCw className="w-3.5 h-3.5 inline-block mr-1" /> Зарядка: <span className="text-amber-500">0.9 сек</span></div>
+                          <div><Award className="w-3.5 h-3.5 inline-block mr-1 text-yellow-400" /> Множитель: <span className="text-emerald-400">1.0x</span></div>
                         </div>
                       </button>
 
@@ -2976,13 +4305,13 @@ export const Tavern: React.FC<TavernProps> = ({
                         }`}
                       >
                         <div>
-                          <div className="font-extrabold text-amber-500 text-sm">🔫 Автомат АК-74М</div>
+                          <div className="font-extrabold text-amber-500 text-sm">Автомат АК-74М</div>
                           <p className="text-[10px] text-gray-500 mt-1 leading-relaxed">Огромная плотность огня, сильный боковой увод ствола.</p>
                         </div>
                         <div className="text-[10px] space-y-0.5 text-gray-400 border-t border-gray-800 pt-2 shrink-0">
                           <div>🪨 Емкость: <span className="text-white font-bold">30 патронов</span></div>
-                          <div>🔄 Зарядка: <span className="text-amber-500">1.4 сек</span></div>
-                          <div>🎖️ Множитель: <span className="text-emerald-400">1.3x</span></div>
+                          <div><RefreshCw className="w-3.5 h-3.5 inline-block mr-1" /> Зарядка: <span className="text-amber-500">1.4 сек</span></div>
+                          <div><Award className="w-3.5 h-3.5 inline-block mr-1 text-yellow-400" /> Множитель: <span className="text-emerald-400">1.3x</span></div>
                         </div>
                       </button>
 
@@ -2996,13 +4325,13 @@ export const Tavern: React.FC<TavernProps> = ({
                         }`}
                       >
                         <div>
-                          <div className="font-extrabold text-purple-400 text-sm">🔫 Винтовка ВСС</div>
+                          <div className="font-extrabold text-purple-400 text-sm">Винтовка ВСС</div>
                           <p className="text-[10px] text-gray-500 mt-1 leading-relaxed">Бесшумный урон, мгновенный полет пули со снайперским зумом.</p>
                         </div>
                         <div className="text-[10px] space-y-0.5 text-gray-400 border-t border-gray-800 pt-2 shrink-0">
                           <div>🪨 Емкость: <span className="text-white font-bold">10 патронов</span></div>
-                          <div>🔄 Зарядка: <span className="text-amber-500">1.1 сек</span></div>
-                          <div>🎖️ Множитель: <span className="text-emerald-400">1.6x</span></div>
+                          <div><RefreshCw className="w-3.5 h-3.5 inline-block mr-1" /> Зарядка: <span className="text-amber-500">1.1 сек</span></div>
+                          <div><Award className="w-3.5 h-3.5 inline-block mr-1 text-yellow-400" /> Множитель: <span className="text-emerald-400">1.6x</span></div>
                         </div>
                       </button>
 
@@ -3012,14 +4341,14 @@ export const Tavern: React.FC<TavernProps> = ({
                       
                       {/* Bet size Selector inside Range */}
                       <div className="space-y-2">
-                        <span className="block text-[10px] font-mono text-gray-500 uppercase tracking-widest leading-none">Размер Оружейного Взноса (RU)</span>
+                        <span className="block text-[10px] font-mono text-gray-500 uppercase tracking-widest leading-none">Размер Оружейного Взноса (в кредитах)</span>
                         <div className="flex gap-1.5 font-mono">
-                          {[50, 100, 250, 500, 1000].map((amt) => (
+                          {[100, 250, 500, 1000].map((amt) => (
                             <button
                               key={amt}
                               onClick={() => setShootingState(prev => ({ ...prev, bet: amt }))}
                               className={`px-3 py-1.5 rounded transition font-bold text-xs cursor-pointer ${
-                                shootingState.bet === amt
+                                (shootingState.bet || 100) === amt
                                   ? "bg-orange-600 text-gray-950 font-extrabold border border-orange-400"
                                   : "bg-gray-900 text-gray-400 border border-gray-850"
                               }`}
@@ -3031,10 +4360,10 @@ export const Tavern: React.FC<TavernProps> = ({
                       </div>
 
                       <button
-                        onClick={() => handleStartShootingGame(shootingState.weapon, shootingState.bet)}
+                        onClick={() => handleStartShootingGame(shootingState.weapon, shootingState.bet || 100)}
                         className="bg-orange-600 hover:bg-orange-500 text-gray-950 font-bold font-mono text-xs px-6 py-2.5 rounded uppercase cursor-pointer transition-all border border-orange-400 animate-pulse tracking-wide font-black"
                       >
-                        ⚔️ НАЧАТЬ УЧЕБНЫЙ СБОР
+                        <span className="flex items-center justify-center gap-1.5">НАЧАТЬ СТРЕЛЬБУ</span>
                       </button>
 
                     </div>
@@ -3043,26 +4372,26 @@ export const Tavern: React.FC<TavernProps> = ({
 
                   {/* Range high scores or tutorial stats */}
                   <div className="bg-gray-950 p-4 rounded-lg border border-gray-850 space-y-4">
-                    <h5 className="text-orange-500 font-bold font-mono text-xs uppercase tracking-wider border-b border-gray-900 pb-2">🎯 ИНСТРУКТАЖ СНАЙПЕРОВ</h5>
+                    <h5 className="text-orange-500 font-bold font-mono text-xs uppercase tracking-wider border-b border-gray-900 pb-2">ИНСТРУКТАЖ СНАЙПЕРОВ</h5>
                     <div className="text-[10px] font-mono text-gray-400 leading-relaxed space-y-2.5">
                       <p>Капитаны Сталкеров предупреждают:</p>
                       <ul className="list-disc pl-4 space-y-1 text-gray-400">
                         <li>Запуск таймера спишет взнос. Сессия прекращается автоматически через <strong className="text-amber-500">15 секунд</strong>.</li>
                         <li>Мишени и Мутанты движутся по экрану с разной скоростью.</li>
                         <li>
-                          <span className="text-red-400 font-bold">🔴 Обычная Мишень</span>: +10 очков.
+                          <span className="text-red-400 font-bold"><span className="flex items-center gap-1">Обычная Мишень</span></span>: +10 очков.
                         </li>
                         <li>
-                          <span className="text-amber-400 font-bold">🧟 Быстрый Снорк</span>: +25 очков.
+                          <span className="text-amber-400 font-bold"><span className="flex items-center gap-1">Быстрый Снорк</span></span>: +25 очков.
                         </li>
                         <li>
-                          <span className="text-indigo-400 font-bold">👾 Невидимый Кровосос</span>: +40 очков.
+                          <span className="text-indigo-400 font-bold"><span className="flex items-center gap-1">Невидимый Кровосос</span></span>: +40 очков.
                         </li>
                         <li>
-                          <span className="text-rose-500 font-bold">🐀 Шкодливый Тушкан</span>: +15 очков.
+                          <span className="text-rose-500 font-bold"><span className="flex items-center gap-1">Шкодливый Тушкан</span></span>: +15 очков.
                         </li>
                         <li>
-                          <span className="text-red-500 font-bold">⚠️ Эколог-Санитар</span>: <span className="font-extrabold text-red-400">-50 очков</span> за ранение! НЕ СТРЕЛЯТЬ!
+                          <span className="text-red-500 font-bold"><CustomWarning />️ Эколог-Санитар</span>: <span className="font-extrabold text-red-400">-50 очков</span> за ранение! НЕ СТРЕЛЯТЬ!
                         </li>
                       </ul>
                       <p className="text-gray-500 pt-2 border-t border-gray-900">
@@ -3083,7 +4412,7 @@ export const Tavern: React.FC<TavernProps> = ({
                       <div>
                         <span className="text-gray-500 uppercase tracking-widest text-[9px] block">Оружие</span>
                         <span className="font-bold text-orange-400 uppercase">
-                          {shootingState.weapon === "pm" ? "🔫 Пистолет ПМ" : shootingState.weapon === "ak" ? "🔫 Штурмовой АК-74" : "🔫 Снайперский ВСС"}
+                          {shootingState.weapon === "pm" ? "Пистолет ПМ" : shootingState.weapon === "ak" ? "Штурмовой АК-74" : "Снайперский ВСС"}
                         </span>
                       </div>
                       <div className="border-l border-gray-800 h-6 px-1" />
@@ -3179,7 +4508,37 @@ export const Tavern: React.FC<TavernProps> = ({
                           }}
                         >
                           <span className="text-[14px] leading-none mb-0.5 select-none font-sans">
-                            {target.type === "bullseye" ? "🔴" : target.type === "snork" ? "🧟" : target.type === "bloodsucker" ? "👻" : target.type === "rat" ? "🐀" : "🔬"}
+                            {target.type === "bullseye" ? (
+                              <svg viewBox="0 0 24 24" className="w-5 h-5 text-red-500 animate-pulse" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <circle cx="12" cy="12" r="10" />
+                                <circle cx="12" cy="12" r="6" strokeWidth="2" />
+                                <circle cx="12" cy="12" r="2" fill="currentColor" />
+                              </svg>
+                            ) : target.type === "snork" ? (
+                              <svg viewBox="0 0 24 24" className="w-5 h-5 text-emerald-500 animate-bounce" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M12 2a5 5 0 0 0-5 5v3a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5z" />
+                                <path d="M6 13a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4" />
+                                <circle cx="9" cy="9" r="1" fill="currentColor" />
+                                <circle cx="15" cy="9" r="1" fill="currentColor" />
+                              </svg>
+                            ) : target.type === "bloodsucker" ? (
+                              <svg viewBox="0 0 24 24" className="w-5 h-5 text-purple-400 animate-pulse" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M12 2a8 8 0 0 0-8 8v12l3-3 3 3 3-3 3 3 3-3 3 3V10a8 8 0 0 0-8-8z" />
+                                <circle cx="9" cy="10" r="1.5" fill="currentColor" />
+                                <circle cx="15" cy="10" r="1.5" fill="currentColor" />
+                              </svg>
+                            ) : target.type === "rat" ? (
+                              <svg viewBox="0 0 24 24" className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M17 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0Z" />
+                                <path d="M9 13a5 5 0 0 1-5-5" />
+                                <circle cx="11" cy="10" r="0.8" fill="currentColor" />
+                              </svg>
+                            ) : (
+                              <svg viewBox="0 0 24 24" className="w-5 h-5 text-sky-400 animate-pulse" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <circle cx="12" cy="12" r="10" />
+                                <path d="M12 8v8M8 12h8" strokeWidth="3" />
+                              </svg>
+                            )}
                           </span>
                           <span className="text-[7px] leading-tight select-none uppercase tracking-tight block max-w-[85%] truncate">
                             {target.type === "loner" ? "НЕ СТРЕЛЯТЬ" : target.label}
@@ -3202,7 +4561,7 @@ export const Tavern: React.FC<TavernProps> = ({
                       disabled={shootingState.reloading || shootingState.ammo === shootingState.maxAmmo}
                       className="bg-gray-900 text-gray-300 hover:text-white border border-gray-800 font-mono text-2xs uppercase px-4 py-1.5 rounded cursor-pointer transition font-bold"
                     >
-                      🔄 Перезарядить ствол
+                      <RefreshCw className="w-3.5 h-3.5 inline-block mr-1" /> Перезарядить ствол
                     </button>
                     <span className="text-[10px] font-mono text-gray-500 uppercase tracking-widest select-none">
                       Кликайте по целям в окне тира для произведения выстрела
@@ -3216,7 +4575,7 @@ export const Tavern: React.FC<TavernProps> = ({
               {shootingState.ended && (
                 <div className="mx-auto max-w-lg bg-gray-950 p-6 rounded-lg border border-orange-900 space-y-4 shadow-xl">
                   <div className="text-center space-y-2">
-                    <div className="text-3xl">🏅</div>
+                    <div className="text-3xl"><CustomTrophy className='w-8 h-8 text-yellow-400' /></div>
                     <h4 className="text-orange-500 font-bold font-mono text-sm uppercase tracking-wider">ОТЧЕТ О СТРЕЛКОВОЙ КВАЛИФИКАЦИИ</h4>
                     <p className="text-gray-400 font-mono text-xs">Ваша учебная тренировка завершена и сохранена в базу КПК</p>
                   </div>
@@ -3228,13 +4587,13 @@ export const Tavern: React.FC<TavernProps> = ({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Размер оклада (Взнос):</span>
-                      <span className="font-bold text-amber-500">{shootingState.bet} RU</span>
+                      <span className="font-bold text-amber-500">{formatCredits(shootingState.bet)}</span>
                     </div>
                     {shootingState.winAmount !== undefined && (
                       <div className="flex justify-between border-t border-gray-850 pt-2.5 animate-pulse">
                         <span className="text-gray-400 uppercase font-bold">Выплата от Куратора:</span>
                         <span className={`font-black uppercase text-sm ${shootingState.winAmount > 0 ? "text-emerald-400" : "text-red-400"}`}>
-                          {shootingState.winAmount} RU ({shootingState.winAmount > 0 ? "ПРИБЫЛЬ" : "УБЫТОК"})
+                          {formatCredits(shootingState.winAmount)} ({shootingState.winAmount > 0 ? "ПРИБЫЛЬ" : "УБЫТОК"})
                         </span>
                       </div>
                     )}
@@ -3261,6 +4620,522 @@ export const Tavern: React.FC<TavernProps> = ({
           )
         )}
 
+        {/* =============== 8. THIMBLERIG TAB =============== */}
+        {activeSubTab === "thimblerig" && (
+          !tavernSettings.enabledGames.thimblerig && !isGM ? (
+            <div className="text-center py-16 bg-gray-950/40 rounded border border-dashed border-red-900/40 p-8">
+              <Lock className="w-12 h-12 text-red-500 mx-auto mb-3 animate-pulse" />
+              <h3 className="text-red-400 font-bold uppercase font-mono tracking-wider text-sm">{LANG.common.statusLocked}</h3>
+              <p className="text-gray-400 text-xs mt-2 font-mono max-w-sm mx-auto leading-relaxed">
+                Куратор временно убрал напёрстки со стола.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {!tavernSettings.enabledGames.thimblerig && (
+                <div className="bg-red-950/40 border border-red-900 text-red-400 text-[11px] font-mono px-3 py-2 rounded text-center uppercase font-bold tracking-wider animate-pulse">
+                  {LANG.common.attentionGM}: Напёрстки заблокированы для игроков!
+                </div>
+              )}
+
+              <div className="bg-gray-950 p-6 rounded-lg border border-teal-900/40 space-y-6">
+                <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+                  <div>
+                    <h3 className="text-teal-400 font-bold uppercase font-mono tracking-wider text-sm">
+                      {LANG.thimblerig.title}
+                    </h3>
+                    <p className="text-gray-500 text-[11px] font-mono mt-0.5">
+                      {LANG.thimblerig.rules}
+                    </p>
+                  </div>
+                  <HelpCircle 
+                    className="w-5 h-5 text-gray-600 hover:text-teal-500 cursor-pointer transition select-none"
+                    onClick={() => setPdaAlert({ text: LANG.thimblerig.ruleAlert, type: "info" })}
+                  />
+                </div>
+
+                {!thimblerigState.active ? (
+                  <div className="flex flex-col items-center py-6 text-center max-w-md mx-auto space-y-5">
+                    <div className="w-16 h-16 rounded-full bg-teal-950/40 border border-teal-800/40 flex items-center justify-center">
+                      <svg viewBox="0 0 24 24" className="w-8 h-8 text-amber-500 fill-current animate-bounce drop-shadow-[0_0_6px_rgba(245,158,11,0.6)]">
+                        <path d="M12 2l-5 3v4l5 3 5-3V5l-5-3zm-4.3 6V5.7l4.3-2.6 4.3 2.6V8L12 10.6 7.7 8z" />
+                        <path d="M10 11h4v4h-4zm0 5h4v4h-4zm1-10.5h2v3h-2z" />
+                        <rect x="9.5" y="11" width="5" height="11" rx="1" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                        <line x1="9.5" y1="14" x2="14.5" y2="14" stroke="currentColor" strokeWidth="1.5" />
+                        <line x1="9.5" y1="17" x2="14.5" y2="17" stroke="currentColor" strokeWidth="1.5" />
+                        <line x1="9.5" y1="20" x2="14.5" y2="20" stroke="currentColor" strokeWidth="1.5" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-gray-300 text-xs font-mono leading-relaxed">
+                        {LANG.thimblerig.desc}
+                      </p>
+                      <p className="text-teal-500 text-xs font-mono font-semibold mt-3">
+                        {LANG.thimblerig.quote}
+                      </p>
+                    </div>
+
+                    <div className="w-full space-y-3 pt-2">
+                      <div className="flex justify-between text-[11px] font-mono text-gray-500">
+                        <span>Сумма ставки (в кредитах):</span>
+                        <span className="text-emerald-400 font-bold">{formatCredits(thimblerigState.bet)}</span>
+                      </div>
+                      <input 
+                        type="range"
+                        min="25"
+                        max="1000"
+                        step="25"
+                        value={thimblerigState.bet}
+                        onChange={(e) => setThimblerigState(prev => ({ ...prev, bet: parseInt(e.target.value) }))}
+                        className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-teal-500"
+                      />
+                      <div className="flex gap-2 justify-center">
+                        {[50, 100, 250, 500].map(val => (
+                          <button
+                            key={val}
+                            onClick={() => setThimblerigState(prev => ({ ...prev, bet: val }))}
+                            className={`px-2.5 py-1 text-[10px] font-mono rounded border transition-all cursor-pointer ${
+                              thimblerigState.bet === val 
+                                ? "bg-teal-950 border-teal-700 text-teal-400 font-bold" 
+                                : "bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300"
+                            }`}
+                          >
+                            {val}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleStartThimblerig(thimblerigState.bet)}
+                      className="w-full bg-teal-600 hover:bg-teal-500 text-gray-950 font-bold font-mono text-xs py-2.5 rounded uppercase cursor-pointer tracking-wider shadow-lg transition"
+                    >
+                      {LANG.thimblerig.startBtn} (-{formatCredits(thimblerigState.bet)})
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center py-6 space-y-8">
+                    {/* Game Message */}
+                    <div className="bg-teal-950/20 border border-teal-900/30 p-2.5 rounded text-center w-full max-w-md">
+                      <p className="text-[11px] font-mono text-teal-400 italic">
+                        {thimblerigState.message || "Следите за банками..."}
+                      </p>
+                    </div>
+
+                    {/* Three Cups / Cans */}
+                    <div className="flex gap-20 justify-center items-end py-10 h-48 max-w-lg mx-auto">
+                      {thimblerigState.positions.map((idx) => {
+                        const isChosen = thimblerigState.selectedCup === idx;
+                        const isWinner = thimblerigState.ballCup === idx;
+                        const isRevealedWinner = thimblerigState.revealed && isWinner;
+                        const isInitialRevealedWinner = thimblerigState.initialReveal && isWinner;
+                        const shouldShowBolt = isRevealedWinner || isInitialRevealedWinner;
+
+                        const revealShift = shouldShowBolt ? "-translate-y-16 scale-95" : "translate-y-0";
+
+                        return (
+                          <motion.div 
+                            key={idx} 
+                            layout
+                            transition={{ type: "spring", stiffness: 140, damping: 14 }}
+                            className="flex flex-col items-center relative select-none w-16"
+                          >
+                            {/* Bolt indicator (visible underneath only when revealed or initially shown) */}
+                            {shouldShowBolt && (
+                              <motion.div 
+                                initial={{ scale: 0, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                className="absolute bottom-2 z-0"
+                              >
+                                <svg viewBox="0 0 24 24" className="w-8 h-8 text-amber-500 fill-amber-500/10 animate-bounce drop-shadow-[0_0_8px_rgba(245,158,11,0.7)]">
+                                  <path d="M6 6l6-3 6 3v3H6V6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                  <rect x="9" y="9" width="6" height="11" rx="0.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                  <line x1="9" y1="12" x2="15" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                  <line x1="9" y1="14.5" x2="15" y2="14.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                  <line x1="9" y1="17" x2="15" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                  <line x1="9" y1="19.5" x2="15" y2="19.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </motion.div>
+                            )}
+
+                            {/* Cup graphics */}
+                            <motion.button
+                              onClick={() => handleChooseCup(idx)}
+                              disabled={thimblerigState.shuffling || thimblerigState.revealed || thimblerigState.initialReveal}
+                              animate={thimblerigState.shuffling ? {
+                                y: [0, -12, 0],
+                              } : {}}
+                              transition={thimblerigState.shuffling ? {
+                                repeat: Infinity,
+                                duration: Math.max(0.12, 0.32 - Math.min(0.20, (thimblerigState.bet / 1000) * 0.18)),
+                                ease: "easeInOut"
+                              } : {}}
+                              className={`w-16 h-20 bg-gradient-to-b from-stone-600 to-stone-800 border-2 rounded-t-xl cursor-pointer relative shadow-xl z-10 transition-all transform flex items-center justify-center ${revealShift} ${
+                                isChosen 
+                                  ? "border-amber-400" 
+                                  : isRevealedWinner 
+                                  ? "border-teal-500 shadow-teal-500/20" 
+                                  : "border-stone-500"
+                              }`}
+                            >
+                              <div className="flex flex-col items-center justify-center gap-1">
+                                <Cylinder className="w-7 h-7 text-stone-400" />
+                              </div>
+                            </motion.button>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Result screen */}
+                    {thimblerigState.revealed && (
+                      <div className="text-center space-y-4 max-w-sm mx-auto pt-4 border-t border-gray-800 w-full">
+                        <div className="font-mono text-xs">
+                          {thimblerigState.winAmount && thimblerigState.winAmount > 0 ? (
+                            <span className="text-emerald-400 font-bold block text-sm">
+                              {LANG.thimblerig.win}: +{formatCredits(thimblerigState.winAmount)}!
+                            </span>
+                          ) : (
+                            <span className="text-red-400 font-bold block text-sm">
+                              {LANG.thimblerig.lose}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex gap-4">
+                          <button
+                            onClick={() => handleStartThimblerig(thimblerigState.bet)}
+                            className="flex-1 bg-teal-600 hover:bg-teal-500 text-gray-950 font-bold font-mono text-xs py-2 rounded uppercase cursor-pointer"
+                          >
+                            Ещё разок
+                          </button>
+                          <button
+                            onClick={() => setThimblerigState(prev => ({ ...prev, active: false }))}
+                            className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold font-mono text-xs py-2 rounded uppercase cursor-pointer"
+                          >
+                            К стойке
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        )}
+
+        {/* =============== 9. SVINYA TAB =============== */}
+        {activeSubTab === "svinya" && (
+          !tavernSettings.enabledGames.svinya && !isGM ? (
+            <div className="text-center py-16 bg-gray-950/40 rounded border border-dashed border-red-900/40 p-8">
+              <Lock className="w-12 h-12 text-red-500 mx-auto mb-3 animate-pulse" />
+              <h3 className="text-red-400 font-bold uppercase font-mono tracking-wider text-sm">Свинья под охраной</h3>
+              <p className="text-gray-400 text-xs mt-2 font-mono max-w-sm mx-auto leading-relaxed">
+                Карточный загон для «Свиньи» временно заперт барменом.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {!tavernSettings.enabledGames.svinya && (
+                <div className="bg-red-950/40 border border-red-900 text-red-400 text-[11px] font-mono px-3 py-2 rounded text-center uppercase font-bold tracking-wider animate-pulse">
+                  ВНИМАНИЕ КУРАТОРА: Игра «Свинья» закрыта для сталкеров!
+                </div>
+              )}
+
+              <div className="bg-gray-950 p-6 rounded-lg border border-pink-900/40 space-y-6">
+                <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+                  <div>
+                    <h3 className="text-pink-400 font-bold uppercase font-mono tracking-wider text-sm">
+                      Карточная игра «Свинья» с Батюшкой
+                    </h3>
+                    <p className="text-gray-500 text-[11px] font-mono mt-0.5">
+                      Традиционная сталкерская игра. Сбрось свои карты в круг и оставь оппонента в «Свиньях»!
+                    </p>
+                  </div>
+                  <HelpCircle 
+                    className="w-5 h-5 text-gray-600 hover:text-pink-500 cursor-pointer transition"
+                    onClick={() => setPdaAlert({ text: "Правила: Тащи карту из круга. Если её масть совпадает или ранг на 1 соседствует с центральной — сбрасываешь! Если не совпадает — забираешь в свой загон. Карта Пики 6 — Ловушка Свиньи! Вытянешь её — заберёшь ВСЮ центральную кучу! Конец игры: когда круг пуст. У кого меньше карт в загоне — забирает банк!", type: "info" })}
+                  />
+                </div>
+
+                {svinyaState.phase === "ready" && (
+                  <div className="flex flex-col items-center py-6 text-center max-w-md mx-auto space-y-5">
+                    <div className="w-16 h-16 rounded-full bg-pink-950/40 border border-pink-800/40 flex items-center justify-center text-3xl">
+                      <CustomPig className='inline w-4 h-4 text-pink-400' />
+                    </div>
+                    <div>
+                      <p className="text-gray-300 text-xs font-mono leading-relaxed">
+                        Карточная «Свинья» — простая игра на выбывание с колодой в 36 карт. Игровое поле — это круговой веер карт, лежащих рубашкой вверх. В центре — плацдарм сброса.
+                      </p>
+                      <p className="text-pink-500 text-xs font-mono font-semibold mt-3">
+                        « Говорят, Харон всегда прячет Пиковый Шестерняк — Свинью-Ловушку. Будь осторожен! Избавишься от карт — унесешь двойной куш! »
+                      </p>
+                    </div>
+
+                    <div className="w-full space-y-3 pt-2">
+                      <div className="flex justify-between text-[11px] font-mono text-gray-500">
+                        <span>Сумма кона (в кредитах):</span>
+                        <span className="text-emerald-400 font-bold">{formatCredits(svinyaState.bet)}</span>
+                      </div>
+                      <input 
+                        type="range"
+                        min="50"
+                        max="1000"
+                        step="50"
+                        value={svinyaState.bet}
+                        onChange={(e) => setSvinyaState(prev => ({ ...prev, bet: parseInt(e.target.value) }))}
+                        className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-pink-500"
+                      />
+                      <div className="flex gap-2 justify-center">
+                        {[50, 100, 200, 500].map(val => (
+                          <button
+                            key={val}
+                            onClick={() => setSvinyaState(prev => ({ ...prev, bet: val }))}
+                            className={`px-2.5 py-1 text-[10px] font-mono rounded border transition-all cursor-pointer ${
+                              svinyaState.bet === val 
+                                ? "bg-pink-950 border-pink-700 text-pink-400 font-bold" 
+                                : "bg-gray-900 border-gray-800 text-gray-500 hover:text-gray-300"
+                            }`}
+                          >
+                            {val}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      disabled={svinyaState.loading}
+                      onClick={() => handleStartSvinya(svinyaState.bet)}
+                      className="w-full bg-pink-600 hover:bg-pink-500 text-gray-950 font-bold font-mono text-xs py-2.5 rounded uppercase cursor-pointer tracking-wider shadow-lg transition disabled:opacity-50"
+                    >
+                      {svinyaState.loading ? "Раскладываем кон..." : `Раздать Колоду (-${formatCredits(svinyaState.bet)})`}
+                    </button>
+                  </div>
+                )}
+
+                {svinyaState.phase === "playing" && (
+                  <div className="flex flex-col space-y-6">
+                    {/* Turn header */}
+                    <div className="flex items-center justify-between bg-gray-900 border border-gray-800 p-3 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2.5 h-2.5 rounded-full ${svinyaState.turn === "player" ? "bg-pink-500 animate-pulse" : "bg-gray-600"}`}></span>
+                        <span className="text-xs uppercase font-mono font-bold text-gray-300">
+                          {svinyaState.turn === "player" ? "ТВОЙ ХОД" : "ХОД БАРМЕНА"}
+                        </span>
+                      </div>
+                      <div className="text-[10px] font-mono text-gray-500">
+                        Осталось карт в кругу: <span className="text-amber-500 font-bold">{svinyaState.circleCards.filter(c => c !== null).length}</span>
+                      </div>
+                    </div>
+
+                    {/* Svinya Circular board */}
+                    <div className="relative w-full h-[260px] flex items-center justify-center bg-gray-950/60 rounded-xl overflow-hidden border border-gray-800/40">
+                      {/* Circle of cards */}
+                      <div className="relative w-[340px] h-[340px] flex items-center justify-center shrink-0">
+                        {svinyaState.circleCards.map((card, idx) => {
+                          if (!card) return null;
+                          const angle = (idx * 360) / 36;
+                          return (
+                            <button
+                              key={idx}
+                              onClick={() => handleSvinyaPlayerDraw(idx)}
+                              disabled={svinyaState.turn !== "player" || svinyaState.phase !== "playing"}
+                              className={`absolute w-8 h-12 rounded border flex items-center justify-center font-bold font-mono transition shadow select-none ${
+                                svinyaState.turn === "player" 
+                                  ? "border-pink-900/50 hover:border-pink-500 hover:-translate-y-1 cursor-pointer bg-zinc-800 text-pink-400"
+                                  : "border-gray-800/20 bg-zinc-900 text-gray-600 cursor-not-allowed"
+                              }`}
+                              style={{
+                                transform: `rotate(${angle}deg) translate(0, -95px) rotate(${-angle}deg)`,
+                                backgroundImage: "repeating-linear-gradient(45deg, #18181b, #18181b 3px, #27272a 3px, #27272a 6px)"
+                              }}
+                            >
+                              <Zap className="w-3 h-3 text-pink-500/85 pointer-events-none" />
+                            </button>
+                          );
+                        })}
+
+                        {/* Central Foundation Pile */}
+                        <div className="absolute w-[86px] h-32 rounded-lg border-2 border-dashed border-pink-900/40 p-1 flex items-center justify-center bg-gray-900/40 shadow-inner">
+                          {svinyaState.centerPile.length > 0 ? (
+                            (() => {
+                              const topVal = svinyaState.centerPile[svinyaState.centerPile.length - 1];
+                              const isRed = topVal.suit === "hearts" || topVal.suit === "diamonds";
+                              const suitSymbol = topVal.suit === "hearts" ? <CustomHeart className='inline w-4 h-4 text-red-500' /> : topVal.suit === "diamonds" ? <CustomDiamond className='inline w-4 h-4 text-red-500' /> : topVal.suit === "clubs" ? <CustomClub className='inline w-4 h-4 text-gray-900' /> : <CustomSpade className='inline w-4 h-4 text-gray-900' />;
+                              
+                              return (
+                                <div className={`w-[74px] h-[114px] bg-zinc-950 border border-pink-900/40 rounded flex flex-col justify-between p-1.5 shadow-lg select-none ${isRed ? "text-red-500" : "text-gray-400"}`}>
+                                  <div className="text-xs font-bold font-mono flex justify-between items-center">
+                                    <span>{topVal.value}</span>
+                                    <span>{suitSymbol}</span>
+                                  </div>
+                                  <div className="text-center text-3xl my-auto">
+                                    {topVal.isPig ? <CustomPig className='inline w-8 h-8 text-pink-400' /> : suitSymbol}
+                                  </div>
+                                  <div className="text-[10px] text-gray-600 font-mono text-center">
+                                    Куча ({svinyaState.centerPile.length})
+                                  </div>
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            <span className="text-[10px] text-gray-600 font-mono text-center">Сброс пуст</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Notification Box */}
+                    {svinyaState.message && (
+                      <p className="text-center text-[11px] font-mono text-pink-400 bg-pink-950/15 border border-pink-900/20 p-2 rounded italic">
+                        <Wrench className="w-4 h-4 inline-block mr-1" /> {svinyaState.message}
+                      </p>
+                    )}
+
+                    {/* Sties status panel */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* 1. Player Sty (Your Sty) */}
+                      <div className="p-4 bg-gray-900/80 rounded-lg border border-pink-900/20 space-y-3">
+                        <div className="flex justify-between items-center border-b border-gray-800 pb-1.5">
+                          <span className="text-xs font-mono font-bold text-gray-300">Твой Загон (Свинарник):</span>
+                          <span className="text-xs font-mono bg-pink-950 text-pink-400 px-2 py-0.5 rounded font-extrabold border border-pink-900/20">
+                            {svinyaState.playerSty.length} шт
+                          </span>
+                        </div>
+
+                        {svinyaState.playerSty.length > 0 ? (
+                          <div className="space-y-3">
+                            <div className="flex gap-1.5 overflow-x-auto py-2 px-1.5">
+                              {svinyaState.playerSty.map((card, cidx) => {
+                                const isRed = card.suit === "hearts" || card.suit === "diamonds";
+                                const suitSymbol = card.suit === "hearts" ? <CustomHeart className='inline w-3 h-3 text-red-500' /> : card.suit === "diamonds" ? <CustomDiamond className='inline w-3 h-3 text-red-500' /> : card.suit === "clubs" ? <CustomClub className='inline w-3 h-3 text-gray-900' /> : <CustomSpade className='inline w-3 h-3 text-gray-900' />;
+                                const isTop = cidx === svinyaState.playerSty.length - 1;
+
+                                return (
+                                  <div 
+                                    key={cidx}
+                                    className={`w-10 h-14 shrink-0 rounded border bg-zinc-950 p-1 flex flex-col justify-between text-[11px] font-bold font-mono transition-all ${
+                                      isRed ? "text-red-500 border-red-900/30" : "text-gray-400 border-gray-800"
+                                    } ${isTop ? "ring-2 ring-pink-500 border-pink-400 scale-105" : "opacity-85"}`}
+                                  >
+                                    <span>{card.value}</span>
+                                    <span className="text-center">{card.isPig ? <CustomPig className='inline w-4 h-4 text-pink-400' /> : suitSymbol}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Discard top card of Sty helper button */}
+                            {(() => {
+                              if (svinyaState.playerSty.length === 0) return null;
+                              const topC = svinyaState.playerSty[svinyaState.playerSty.length - 1];
+                              const centerC = svinyaState.centerPile[svinyaState.centerPile.length - 1];
+                              const playable = checkSvinyaPlayable(topC, centerC);
+
+                              return (
+                                <button
+                                  disabled={!playable || svinyaState.turn !== "player"}
+                                  onClick={handleSvinyaPlayStyBack}
+                                  className={`w-full py-1.5 rounded text-[10px] font-mono uppercase font-bold tracking-wider cursor-pointer ${
+                                    playable && svinyaState.turn === "player"
+                                      ? "bg-pink-600 hover:bg-pink-500 text-gray-950 animate-bounce"
+                                      : "bg-gray-800 text-gray-600 cursor-not-allowed"
+                                  }`}
+                                >
+                                  {playable ? `Сбросить верхнюю карту (${topC.value})` : "Сброс недоступен (не подходит)"}
+                                </button>
+                              );
+                            })()}
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-gray-600 font-mono text-center py-2 italic font-semibold">
+                            Чистый хлев! Ни одной свиной карты.
+                          </p>
+                        )}
+                      </div>
+
+                      {/* 2. Bot Sty (Barman Sty) */}
+                      <div className="p-4 bg-gray-900/80 rounded-lg border border-gray-800 space-y-3">
+                        <div className="flex justify-between items-center border-b border-gray-800 pb-1.5">
+                          <span className="text-xs font-mono font-bold text-gray-300"><User className='w-3.5 h-3.5 inline mr-1 text-red-400' /> Загон Бармена:</span>
+                          <span className="text-xs font-mono bg-gray-800 text-gray-400 px-2 py-0.5 rounded font-extrabold border border-gray-700/50">
+                            {svinyaState.botSty.length} шт
+                          </span>
+                        </div>
+
+                        {svinyaState.botSty.length > 0 ? (
+                          <div className="space-y-3">
+                            <div className="flex gap-1 py-1 overflow-x-auto">
+                              {svinyaState.botSty.map((card, bidx) => (
+                                <div key={bidx} className="w-6 h-10 shrink-0 border border-dashed border-gray-800 bg-zinc-900/50 flex items-center justify-center text-[10px] font-mono text-gray-600">
+                                  <CustomNote className='inline w-4 h-4 text-stone-500' />
+                                </div>
+                              ))}
+                            </div>
+                            <p className="text-[10px] text-gray-500 font-mono italic text-center">
+                              Бармен хмурится и поглядывает на свои карты.
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-gray-600 font-mono text-center py-2 italic">
+                            У бармена идеально стерильный загон!
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {svinyaState.phase === "ended" && (
+                  <div className="text-center py-6 space-y-5 max-w-sm mx-auto">
+                    <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center text-4xl bg-pink-950/20 border border-pink-900/30">
+                      {svinyaState.result === "win" ? <CustomTrophy className='inline w-8 h-8 text-yellow-500' /> : svinyaState.result === "tie" ? <CustomHandshake className='inline w-8 h-8 text-blue-400' /> : <CustomPig className='inline w-8 h-8 text-pink-400' />}
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="font-bold text-gray-200 uppercase font-mono tracking-wider text-sm">
+                        Партия завершена!
+                      </h4>
+                      <div className="p-3.5 bg-gray-950 border border-gray-800/80 rounded font-mono text-[11px] space-y-1">
+                        <div className="flex justify-between">
+                          <span>Ваши карты в загоне:</span>
+                          <span className="text-pink-400 font-semibold">{svinyaState.playerSty.length} шт</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Карты бармена:</span>
+                          <span className="text-gray-400">{svinyaState.botSty.length} шт</span>
+                        </div>
+                      </div>
+
+                      {svinyaState.message && (
+                        <p className="text-xs font-mono text-pink-400 italic bg-pink-950/10 p-2.5 rounded border border-pink-900/20 leading-relaxed">
+                          « {svinyaState.message} »
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex gap-4">
+                      <button
+                        onClick={() => handleStartSvinya(svinyaState.bet)}
+                        className="flex-1 bg-pink-600 hover:bg-pink-500 text-gray-950 font-bold font-mono text-xs py-2 rounded uppercase cursor-pointer"
+                      >
+                        Замешать еще раз
+                      </button>
+                      <button
+                        onClick={() => setSvinyaState(prev => ({ ...prev, phase: "ready" }))}
+                        className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold font-mono text-xs py-2 rounded uppercase cursor-pointer"
+                      >
+                        Выйти
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        )}
+
       </div>
 
       {/* GM Global Admin wallet panel when active */}
@@ -3276,7 +5151,7 @@ export const Tavern: React.FC<TavernProps> = ({
               return (
                 <div key={pId} className="bg-gray-900 border border-gray-800 p-1.5 rounded flex items-center gap-2.5">
                   <span className="text-gray-400 font-bold font-mono">{val.userName || pId.slice(0, 5)}:</span>
-                  <span className="text-emerald-400 font-bold">{val.balance} RU</span>
+                  <span className="text-emerald-400 font-bold">{formatCredits(val.balance)}</span>
                   <div className="flex gap-1 select-none">
                     <button
                       onClick={() => handleGMModifyBalanceLocal(pId, 250)}
